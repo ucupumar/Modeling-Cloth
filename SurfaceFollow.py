@@ -517,18 +517,17 @@ class SurfaceFollowPanel(bpy.types.Panel):
 
 def register():
     create_properties()
-    bpy.utils.register_class(SurfaceFollowPanel)
-    bpy.utils.register_class(BindToSurface)
-    bpy.utils.register_class(UpdateOnce)
-    bpy.utils.register_class(ToggleSurfaceFollow)
 
+    # Register all classes if this file loaded individually
+    if __name__ in {'__main__', 'SurfaceFollow'}:
+        bpy.utils.register_module(__name__)
 
 def unregister():
     remove_properties()
-    bpy.utils.unregister_class(BindToSurface)
-    bpy.utils.unregister_class(UpdateOnce)
-    bpy.utils.unregister_class(ToggleSurfaceFollow)
-    bpy.utils.unregister_class(SurfaceFollowPanel)
+
+    # Unregister all classes if this file loaded individually
+    if __name__ in {'__main__', 'SurfaceFollow'}:
+        bpy.utils.unregister_module(__name__)
 
 if __name__ == "__main__":
     register()

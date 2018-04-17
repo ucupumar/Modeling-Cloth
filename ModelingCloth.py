@@ -54,8 +54,6 @@ from bpy_extras import view3d_utils
 from bpy.props import *
 from bpy.app.handlers import persistent
 from mathutils import *
-import pickle
-import codecs
 import time
 import sys
 
@@ -112,7 +110,6 @@ def triangulate(ob):
 def tri_normals_in_place(ob, col, tri_co):    
     """Takes N x 3 x 3 set of 3d triangles and 
     returns non-unit normals and origins"""
-    #col = get_collider_data(ob)
     col.origins = tri_co[:,0]
     col.cross_vecs = tri_co[:,1:] - col.origins[:, nax]
     col.normals = np.cross(col.cross_vecs[:,0], col.cross_vecs[:,1])
@@ -136,7 +133,6 @@ def closest_points_edge(vec, origin, p):
 
 def proxy_in_place(ob, col):
     """Overwrite vert coords with modifiers in world space"""
-    #col = get_collider_data(ob)
     me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     me.vertices.foreach_get('co', col.co.ravel())
     bpy.data.meshes.remove(me)
@@ -146,7 +142,6 @@ def proxy_in_place(ob, col):
 def apply_rotation(ob, col):
     """When applying vectors such as normals we only need
     to rotate"""
-    #col = get_collider_data(ob)
     m = np.array(ob.matrix_world)
     mat = m[:3, :3].T
     col.v_normals = col.v_normals @ mat
@@ -154,7 +149,6 @@ def apply_rotation(ob, col):
 
 def proxy_v_normals_in_place(ob, col, world=True):
     """Overwrite vert coords with modifiers in world space"""
-    #col = get_collider_data(ob)
     me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     me.vertices.foreach_get('normal', col.v_normals.ravel())
     bpy.data.meshes.remove(me)
@@ -494,7 +488,6 @@ def add_remove_virtual_springs(remove=False):
         for i in reversed(deleter):
             ob.mc.virtual_springs.remove(i)
 
-        #ob.mc.force_update = True
         return
 
     existing = np.append(cloth.eidx, virtual_springs, axis=0)
@@ -518,7 +511,6 @@ def add_remove_virtual_springs(remove=False):
             new_vs.vertex_id_2 = sv
 
     # gets appended to eidx in the cloth_init function after calling get connected polys in case geometry changes
-    #ob.mc.force_update = True
 
 
 def generate_guide_mesh():
@@ -639,12 +631,6 @@ def get_spring_mix(ob, eidx):
     return mix
         
 
-#def update_pin_group():
-#    """Updates the cloth data after changing mesh or vertex weight pins"""
-#    ob = get_last_object()[1]
-#    create_cloth_data(ob) #, new=False)
-
-
 def collision_data_update(self, context):
     ob = self.id_data
     if ob.mc.self_collision:    
@@ -699,46 +685,11 @@ def check_and_get_pins_and_hooks(ob):
         
     
 class ClothData:
-    def __init__(self):
-        pass
-
-        # Optionally preserved
-
-        #self.idxer = None #np (vert ids)
-        #self.co = None #np (vert coords)
-        #self.eidx = None #np (linear and diagonal edge vertex ids)
-        #self.eidx_tiler = None #np (transpose ravel of eidx)
-        #self.pindexer = None #np (vert ids of not weight pinned verts)
-        #self.sco = None #np (shape key coordinates)
-        #self.sew_edges = None #np (vert ids of sew edges)
-        #self.mix = None #np
-        #self.noise = None #np
-        #self.c_peat = None #np
-        #self.t_peat = None #np
-        #self.tridex = None #np (vert ids of triangulate meshes)
-        #self.tridexer = None #np (triangle ids of triangulate meshes)
-        #self.unpinned = None #np (edge vert ids(?) of not weight pinned verts)
-        #self.v_normals = None #np (vertex normals)
-        #self.vel_start = None #np (vertex coord at start of every frame)
-
-        ## Better be preserved
-
-        #self.vel = None #np (vertex velocity vectors)
-        #self.wind = None #np (wind vectors)
-
-        ###
-
-        #self.count = 0 #int (num_vertices)
-        ##self.pcount = 0 #int (number of not weight pinned verts)
-        ##self.clicked = False #bool (drag event)
-        ##self.name = '' #string
-        #self.ob = None #object pointer
-        ##self.waiting = False #bool
+    pass
 
 def create_cloth_data(ob): #, new=True):
     """Creates instance of cloth object with attributes needed for engine"""
     data = bpy.context.window_manager.modeling_cloth_data_set
-    #cloth = get_cloth_data(ob)
 
     # Try to get the cloth data first
     try:
@@ -910,324 +861,291 @@ def create_cloth_data(ob): #, new=True):
 
 
 def run_handler(ob, cloth):
-    #print(bpy.context.scene.frame_current)
     scene = bpy.context.scene
     extra_data = bpy.context.window_manager.modeling_cloth_data_set_extra
     col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
-    #ob = cloth.ob
 
-    # BIG TRY, UPDATE CLOTH IF ERROR HAPPENS
-    if ob.mc.frame_update | ob.mc.scene_update:
     #try:
-        #cloth = get_cloth_data(ob)
 
-        #if ob.mode == 'EDIT':
-        if ob.mode != 'OBJECT':
-            ob.mc.waiting = True
+    if ob.mode != 'OBJECT':
+        ob.mc.waiting = True
 
-        if ob.mc.waiting:    
-            if ob.mode == 'OBJECT':
-                # Update cloth if number of vertices changes
-                #if ob.mc.force_update or len(ob.data.vertices) != cloth.co.shape[0]:
-                #    create_cloth_data(ob)
-                #    ob.mc.force_update = False
-                create_cloth_data(ob)
-                ob.mc.waiting = False
+    if ob.mc.waiting:    
+        if ob.mode == 'OBJECT':
+            create_cloth_data(ob)
+            ob.mc.waiting = False
 
-        if not ob.mc.waiting:
-            #print('INFO: Beginning cloth handler loops...')
+    if not ob.mc.waiting:
     
-            eidx = cloth.eidx # world's most important variable
+        eidx = cloth.eidx # world's most important variable
 
-            ob.data.shape_keys.key_blocks['modeling cloth source key'].data.foreach_get('co', cloth.sco.ravel())
-            sco = cloth.sco
-            #sco.shape = (cloth.count, 3)
-            #ob.data.shape_keys.key_blocks['modeling cloth key'].data.foreach_get('co', cloth.co.ravel())
-            co = cloth.co
-            #co.shape = (cloth.count, 3)
-            svecs = sco[eidx[:, 1]] - sco[eidx[:, 0]]
-            sdots = np.einsum('ij,ij->i', svecs, svecs)
+        ob.data.shape_keys.key_blocks['modeling cloth source key'].data.foreach_get('co', cloth.sco.ravel())
+        sco = cloth.sco
+        #sco.shape = (cloth.count, 3)
+        #ob.data.shape_keys.key_blocks['modeling cloth key'].data.foreach_get('co', cloth.co.ravel())
+        co = cloth.co
+        #co.shape = (cloth.count, 3)
+        svecs = sco[eidx[:, 1]] - sco[eidx[:, 0]]
+        sdots = np.einsum('ij,ij->i', svecs, svecs)
 
-            co[cloth.pindexer] += cloth.noise[cloth.pindexer]
-            cloth.noise *= ob.mc.noise_decay
+        co[cloth.pindexer] += cloth.noise[cloth.pindexer]
+        cloth.noise *= ob.mc.noise_decay
 
-            # mix in vel before collisions and sewing
-            co[cloth.pindexer] += cloth.vel[cloth.pindexer]
+        # mix in vel before collisions and sewing
+        co[cloth.pindexer] += cloth.vel[cloth.pindexer]
 
-            cloth.vel_start[:] = co
-            force = ob.mc.spring_force
-            mix = cloth.mix * force
+        cloth.vel_start[:] = co
+        force = ob.mc.spring_force
+        mix = cloth.mix * force
 
-            #if cloth.clicked: # for the grab tool
-                #grab = np.array([extra_data['stored_vidx'][v] + extra_data['move'] for v in range(len(extra_data['vidx']))])
-                #grab_idx = extra_data['vidx']    
-                    #loc = extra_data['stored_vidx'][v] + extra_data['move']
+        #if ob.mc.clicked: # for the grab tool
+            #grab = np.array([extra_data['stored_vidx'][v] + extra_data['move'] for v in range(len(extra_data['vidx']))])
+            #grab_idx = extra_data['vidx']    
+                #loc = extra_data['stored_vidx'][v] + extra_data['move']
 
-            pin_list = []
-            if len(ob.mc.pins) > 0:
-                pin_list, hook_list = check_and_get_pins_and_hooks(ob)
-                hook_co = np.array([ob.matrix_world.inverted() * hook.matrix_world.to_translation() 
-                    for hook in hook_list])
+        pin_list = []
+        if len(ob.mc.pins) > 0:
+            pin_list, hook_list = check_and_get_pins_and_hooks(ob)
+            hook_co = np.array([ob.matrix_world.inverted() * hook.matrix_world.to_translation() 
+                for hook in hook_list])
 
-            for x in range(ob.mc.iterations):    
+        for x in range(ob.mc.iterations):    
 
-                # add pull
-                vecs = co[eidx[:, 1]] - co[eidx[:, 0]]
-                dots = np.einsum('ij,ij->i', vecs, vecs)
-                div = np.nan_to_num(sdots / dots)
-                swap = vecs * np.sqrt(div)[:, nax]
-                move = vecs - swap
-                # pull only test--->>>
-                #move[div > 1] = 0
-                push = ob.mc.push_springs
-                if push == 0:
-                    move[div > 1] = 0
-                else:
-                    move[div > 1] *= push
-                # pull only test--->>>
-                
-                tiled_move = np.append(move, -move, axis=0)[cloth.unpinned] * mix # * mix for stability: force multiplied by 1/number of springs
-
-                #print(np.unique(cloth.eidx_tiler))
-                
-                #tiled_move = np.append(move, -move, axis=0)[cloth.unpinned] * new_mix # * mix for stability: force multiplied by 1/number of springs
-                #T = time.time()
-                np.add.at(cloth.co, cloth.eidx_tiler, tiled_move)
-                #print(x, (time.time()-T)*1000)
-
-                ###if ob.mc.object_collision_detect:
-                    ###if cloth.collide_list.shape[0] > 0:
-                        ###cloth.co[cloth.col_idx] = cloth.collide_list
-                
-                #if len(cloth.pin_list) > 0:
-                #    hook_co = np.array([ob.matrix_world.inverted() * i.matrix_world.to_translation() for i in cloth.hook_list])
-                #    cloth.co[cloth.pin_list] = hook_co
-                #if pin_count > 0:
-                if pin_list:
-                    cloth.co[pin_list] = hook_co
-                
-                # grab inside spring iterations
-                if ob.mc.clicked: # for the grab tool
-                    cloth.co[extra_data['vidx']] = np.array(extra_data['stored_vidx']) + np.array(+ extra_data['move'])   
+            # add pull
+            vecs = co[eidx[:, 1]] - co[eidx[:, 0]]
+            dots = np.einsum('ij,ij->i', vecs, vecs)
+            div = np.nan_to_num(sdots / dots)
+            swap = vecs * np.sqrt(div)[:, nax]
+            move = vecs - swap
+            # pull only test--->>>
+            #move[div > 1] = 0
+            push = ob.mc.push_springs
+            if push == 0:
+                move[div > 1] = 0
+            else:
+                move[div > 1] *= push
+            # pull only test--->>>
             
-            spring_dif = cloth.co - cloth.vel_start
-            grav = ob.mc.gravity * (.01 / ob.mc.iterations)
-            cloth.vel += revert_rotation(ob, np.array([0, 0, grav]))
+            tiled_move = np.append(move, -move, axis=0)[cloth.unpinned] * mix # * mix for stability: force multiplied by 1/number of springs
 
-            # refresh normals for inflate and wind
-            get_v_normals(ob, cloth.v_normals)
-
-            # wind:
-            x = ob.mc.wind_x
-            y = ob.mc.wind_y
-            z = ob.mc.wind_z
-            wind_vec = np.array([x,y,z])
-            generate_wind(wind_vec, ob, cloth.v_normals, cloth.wind, cloth.vel)            
-
-            # inflate
-            inflate = ob.mc.inflate * .1
-            if inflate != 0:
-                cloth.v_normals *= inflate
-                cloth.vel += cloth.v_normals
-
-            #cloth.vel += spring_dif * 4                    
-            # inextensible calc:
-            ab_dot = np.einsum('ij, ij->i', cloth.vel, spring_dif)
-            aa_dot = np.einsum('ij, ij->i', spring_dif, spring_dif)
-            div = np.nan_to_num(ab_dot / aa_dot)
-            cp = spring_dif * div[:, nax]
-            cloth.vel -= np.nan_to_num(cp)
-            cloth.vel += (spring_dif + cp)
+            #print(np.unique(cloth.eidx_tiler))
             
-            cloth.vel += spring_dif        
+            #tiled_move = np.append(move, -move, axis=0)[cloth.unpinned] * new_mix # * mix for stability: force multiplied by 1/number of springs
+            np.add.at(cloth.co, cloth.eidx_tiler, tiled_move)
 
-            # The amount of drag increases with speed. 
-            # have to converto to a range between 0 and 1
-            squared_move_dist = np.einsum("ij, ij->i", cloth.vel, cloth.vel)
-            squared_move_dist += 1
-            cloth.vel *= (1 / (squared_move_dist / ob.mc.velocity))[:, nax]
+            ###if ob.mc.object_collision_detect:
+                ###if cloth.collide_list.shape[0] > 0:
+                    ###cloth.co[cloth.col_idx] = cloth.collide_list
             
-            # old self collisions
-            self_col = ob.mc.self_collision
-
-            if self_col:
-                V3 = [] # because I'm multiplying the vel by this value and it doesn't exist unless there are collisions
-                col_margin = ob.mc.self_collision_margin
-                sq_margin = col_margin ** 2
-                
-                cloth.p_means = get_poly_centers(ob)
-                
-                #======== collision tree---
-                # start with the greatest dimension(if it's flat on the z axis, it will return everything so start with an axis with the greatest dimensions)
-                order = np.argsort(ob.dimensions) # last on first since it goes from smallest to largest
-                axis_1 = cloth.co[:, order[2]]
-                axis_2 = cloth.co[:, order[1]]
-                axis_3 = cloth.co[:, order[0]]
-                center_1 = cloth.p_means[:, order[2]]
-                center_2 = cloth.p_means[:, order[1]]
-                center_3 = cloth.p_means[:, order[0]]
-                
-                V = cloth.v_repeater # one set of verts for each face
-                P = cloth.p_repeater # faces repeated in order to aling to v_repearter
-                
-                check_1 = np.abs(axis_1[V] - center_1[P]) < cloth.cy_dists[P]
-                V1 = V[check_1]
-                P1 = P[check_1]
-                C1 = cloth.cy_dists[P1]
-                
-                check_2 = np.abs(axis_2[V1] - center_2[P1]) < C1
-                
-                V2 = V1[check_2]
-                P2 = P1[check_2]
-                C2 = C1[P2]            
-
-                check_3 = np.abs(axis_3[V2] - center_3[P2]) < C2
-
-                v_hits = V2[check_3]
-                p_hits = P2[check_3]
-                #======== collision tree end ---
-                if p_hits.shape[0] > 0:        
-                    # now do closest point edge with points on normals
-                    normals = get_poly_normals(ob)[p_hits]
-                    
-                    base_vecs = cloth.co[v_hits] - cloth.p_means[p_hits]
-                    d = np.einsum('ij,ij->i', base_vecs, normals) / np.einsum('ij,ij->i', normals, normals)        
-                    cp = normals * d[:, nax]
-                    
-                    # now measure the distance along the normal to see if it's in the cylinder
-                    
-                    cp_dot = np.einsum('ij,ij->i', cp, cp)
-                    in_margin = cp_dot < sq_margin
-                    
-                    if in_margin.shape[0] > 0:
-                        V3 = v_hits[in_margin]
-                        #P3 = p_hits[in_margin]
-                        cp3 = cp[in_margin]
-                        cpd3 = cp_dot[in_margin]
-                        
-                        d1 = sq_margin
-                        d2 = cpd3
-                        div = d1/d2
-                        surface = cp3 * np.sqrt(div)[:, nax]
-
-                        force = np.nan_to_num(surface - cp3)
-                        force *= ob.mc.self_collision_force
-                        
-                        cloth.co[V3] += force
-
-                        cloth.vel[V3] *= .2                   
-                        #np.add.at(cloth.co, V3, force * .5)
-                        #np.multiply.at(cloth.vel, V3, 0.2)
-                        
-                        # could get some speed help by iterating over a dict maybe
-                        #if False:    
-                        #if True:    
-                            #for i in range(len(P3)):
-                                #cloth.co[cloth.v_per_p[P3[i]]] -= force[i]
-                                #cloth.vel[cloth.v_per_p[P3[i]]] -= force[i]
-                                #cloth.vel[cloth.v_per_p[P3[i]]] *= 0.2
-                                #cloth.vel[cloth.v_per_p[P3[i]]] += cloth.vel[V3[i]]
-                                #need to transfer the velocity back and forth between hit faces.
-
-            #collision=====================================
-
-
-            if ob.mc.sew != 0:
-                if len(cloth.sew_edges) > 0:
-                    sew_edges = cloth.sew_edges
-                    rs = co[sew_edges[:,1]]
-                    ls = co[sew_edges[:,0]]
-                    sew_vecs = (rs - ls) * 0.5 * ob.mc.sew
-                    co[sew_edges[:,1]] -= sew_vecs
-                    co[sew_edges[:,0]] += sew_vecs
-
-            
-            # floor ---
-            if ob.mc.floor:    
-                floored = cloth.co[:,2] < 0        
-                cloth.vel[:,2][floored] *= -1
-                cloth.vel[floored] *= .1
-                cloth.co[:, 2][floored] = 0
-            # floor ---            
-            
-
-            #co[cloth.pindexer] += cloth.vel[cloth.pindexer]
-            #cloth.co = co
-            
-            # objects ---
-            #T = time.time()
-            if ob.mc.object_collision_detect:
-                #print('INFO: Doing collider loops...')
-                cull_ids = []
-                for i, cp in enumerate(scene.mc.collider_pointers):
-                    # Delete pointers if object is deleted
-                    if not cp.object or cp.object.users < 2: 
-                        cull_ids.append(i)
-                        continue
-                    #col = get_collider_data(cp.object)
-                    if cp.object == ob:    
-                        # Does nothing because it will cause error if using modifier
-                        pass
-                        #if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
-                        #    self_collide(ob)
-                        #else:
-                        #    try:
-                        #       self_collide(ob)
-                        #    except:
-                        #        print(sys.exc_info())
-                        #        print('ERROR: Collider error! Updating to new collider data!')
-                        #        col = create_collider_data(ob)
-                        #        self_collide(ob)
-                    else:    
-                        if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
-                            object_collide(ob, cp.object)
-                        else:
-                            try:
-                               object_collide(ob, cp.object)
-                            except:
-                                print(sys.exc_info())
-                                print('ERROR: Collider error! Updating to new collider data!')
-                                col = create_collider_data(cp.object)
-                                object_collide(ob, cp.object)
-
-                # Delete pointers and data for deleted colliders
-                for i in reversed(cull_ids):
-                    cp = scene.mc.collider_pointers[i]
-
-                    #cull_keys = []
-                    #for key, col in col_data.items():
-                    #    if col.ob == cp.object:
-                    #        cull_keys.append(key)
-
-                    #for key in cull_keys:
-                    #    del(col_data[key])
-
-                    scene.mc.collider_pointers.remove(i)
-            #print(time.time()-T, "the whole enchalada")
-            #print(x)
-            # objects ---
-
-            #if len(cloth.pin_list) > 0:
-            #    cloth.co[cloth.pin_list] = hook_co
-            #    cloth.vel[cloth.pin_list] = 0
             if pin_list:
                 cloth.co[pin_list] = hook_co
-                cloth.vel[pin_list] = 0
-
-            if ob.mc.clicked: # for the grab tool
-                cloth.co[extra_data['vidx']] = np.array(extra_data['stored_vidx']) + np.array(+ extra_data['move'])
             
-            ob.data.shape_keys.key_blocks['modeling cloth key'].data.foreach_set('co', cloth.co.ravel())
-            ob.data.shape_keys.key_blocks['modeling cloth key'].mute = True
-            ob.data.shape_keys.key_blocks['modeling cloth key'].mute = False
+            # grab inside spring iterations
+            if ob.mc.clicked: # for the grab tool
+                cloth.co[extra_data['vidx']] = np.array(extra_data['stored_vidx']) + np.array(+ extra_data['move'])   
+        
+        spring_dif = cloth.co - cloth.vel_start
+        grav = ob.mc.gravity * (.01 / ob.mc.iterations)
+        cloth.vel += revert_rotation(ob, np.array([0, 0, grav]))
+
+        # refresh normals for inflate and wind
+        get_v_normals(ob, cloth.v_normals)
+
+        # wind:
+        x = ob.mc.wind_x
+        y = ob.mc.wind_y
+        z = ob.mc.wind_z
+        wind_vec = np.array([x,y,z])
+        generate_wind(wind_vec, ob, cloth.v_normals, cloth.wind, cloth.vel)            
+
+        # inflate
+        inflate = ob.mc.inflate * .1
+        if inflate != 0:
+            cloth.v_normals *= inflate
+            cloth.vel += cloth.v_normals
+
+        #cloth.vel += spring_dif * 4                    
+        # inextensible calc:
+        ab_dot = np.einsum('ij, ij->i', cloth.vel, spring_dif)
+        aa_dot = np.einsum('ij, ij->i', spring_dif, spring_dif)
+        div = np.nan_to_num(ab_dot / aa_dot)
+        cp = spring_dif * div[:, nax]
+        cloth.vel -= np.nan_to_num(cp)
+        cloth.vel += (spring_dif + cp)
+        
+        cloth.vel += spring_dif        
+
+        # The amount of drag increases with speed. 
+        # have to converto to a range between 0 and 1
+        squared_move_dist = np.einsum("ij, ij->i", cloth.vel, cloth.vel)
+        squared_move_dist += 1
+        cloth.vel *= (1 / (squared_move_dist / ob.mc.velocity))[:, nax]
+        
+        # old self collisions
+        self_col = ob.mc.self_collision
+
+        if self_col:
+            V3 = [] # because I'm multiplying the vel by this value and it doesn't exist unless there are collisions
+            col_margin = ob.mc.self_collision_margin
+            sq_margin = col_margin ** 2
+            
+            cloth.p_means = get_poly_centers(ob)
+            
+            #======== collision tree---
+            # start with the greatest dimension(if it's flat on the z axis, it will return everything so start with an axis with the greatest dimensions)
+            order = np.argsort(ob.dimensions) # last on first since it goes from smallest to largest
+            axis_1 = cloth.co[:, order[2]]
+            axis_2 = cloth.co[:, order[1]]
+            axis_3 = cloth.co[:, order[0]]
+            center_1 = cloth.p_means[:, order[2]]
+            center_2 = cloth.p_means[:, order[1]]
+            center_3 = cloth.p_means[:, order[0]]
+            
+            V = cloth.v_repeater # one set of verts for each face
+            P = cloth.p_repeater # faces repeated in order to aling to v_repearter
+            
+            check_1 = np.abs(axis_1[V] - center_1[P]) < cloth.cy_dists[P]
+            V1 = V[check_1]
+            P1 = P[check_1]
+            C1 = cloth.cy_dists[P1]
+            
+            check_2 = np.abs(axis_2[V1] - center_2[P1]) < C1
+            
+            V2 = V1[check_2]
+            P2 = P1[check_2]
+            C2 = C1[P2]            
+
+            check_3 = np.abs(axis_3[V2] - center_3[P2]) < C2
+
+            v_hits = V2[check_3]
+            p_hits = P2[check_3]
+            #======== collision tree end ---
+            if p_hits.shape[0] > 0:        
+                # now do closest point edge with points on normals
+                normals = get_poly_normals(ob)[p_hits]
+                
+                base_vecs = cloth.co[v_hits] - cloth.p_means[p_hits]
+                d = np.einsum('ij,ij->i', base_vecs, normals) / np.einsum('ij,ij->i', normals, normals)        
+                cp = normals * d[:, nax]
+                
+                # now measure the distance along the normal to see if it's in the cylinder
+                
+                cp_dot = np.einsum('ij,ij->i', cp, cp)
+                in_margin = cp_dot < sq_margin
+                
+                if in_margin.shape[0] > 0:
+                    V3 = v_hits[in_margin]
+                    #P3 = p_hits[in_margin]
+                    cp3 = cp[in_margin]
+                    cpd3 = cp_dot[in_margin]
+                    
+                    d1 = sq_margin
+                    d2 = cpd3
+                    div = d1/d2
+                    surface = cp3 * np.sqrt(div)[:, nax]
+
+                    force = np.nan_to_num(surface - cp3)
+                    force *= ob.mc.self_collision_force
+                    
+                    cloth.co[V3] += force
+
+                    cloth.vel[V3] *= .2                   
+                    #np.add.at(cloth.co, V3, force * .5)
+                    #np.multiply.at(cloth.vel, V3, 0.2)
+                    
+                    # could get some speed help by iterating over a dict maybe
+                    #if False:    
+                    #if True:    
+                        #for i in range(len(P3)):
+                            #cloth.co[cloth.v_per_p[P3[i]]] -= force[i]
+                            #cloth.vel[cloth.v_per_p[P3[i]]] -= force[i]
+                            #cloth.vel[cloth.v_per_p[P3[i]]] *= 0.2
+                            #cloth.vel[cloth.v_per_p[P3[i]]] += cloth.vel[V3[i]]
+                            #need to transfer the velocity back and forth between hit faces.
+
+        #collision=====================================
+
+
+        if ob.mc.sew != 0:
+            if len(cloth.sew_edges) > 0:
+                sew_edges = cloth.sew_edges
+                rs = co[sew_edges[:,1]]
+                ls = co[sew_edges[:,0]]
+                sew_vecs = (rs - ls) * 0.5 * ob.mc.sew
+                co[sew_edges[:,1]] -= sew_vecs
+                co[sew_edges[:,0]] += sew_vecs
+
+        
+        # floor ---
+        if ob.mc.floor:    
+            floored = cloth.co[:,2] < 0        
+            cloth.vel[:,2][floored] *= -1
+            cloth.vel[floored] *= .1
+            cloth.co[:, 2][floored] = 0
+        # floor ---            
+        
+
+        #co[cloth.pindexer] += cloth.vel[cloth.pindexer]
+        #cloth.co = co
+        
+        # objects ---
+        #T = time.time()
+        if ob.mc.object_collision_detect:
+            cull_obs = []
+            for i, cp in enumerate(scene.mc.collider_pointers):
+                # Delete pointers if object is deleted
+                if not cp.object or cp.object.users < 2: 
+                    cull_obs.append(cp.object)
+                    continue
+
+                if cp.object == ob:    
+                    # Does nothing because it will cause error if using modifier
+                    pass 
+
+                    #if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
+                    #    self_collide(ob)
+                    #else:
+                    #    try:
+                    #       self_collide(ob)
+                    #    except:
+                    #        print(sys.exc_info())
+                    #        print('ERROR: Collider error! Updating to new collider data!')
+                    #        col = create_collider_data(ob)
+                    #        self_collide(ob)
+                else:    
+                    if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
+                        object_collide(ob, cp.object)
+                    else:
+                        try:
+                           object_collide(ob, cp.object)
+                        except:
+                            print(sys.exc_info())
+                            print('ERROR: Collider error! Updating to new collider data!')
+                            col = create_collider_data(cp.object)
+                            object_collide(ob, cp.object)
+
+            # Remove collider object from pointer list
+            for o in cull_obs:
+                o.mc.object_collision = False
+
+        #print(time.time()-T, "the whole enchalada")
+        # objects ---
+
+        if pin_list:
+            cloth.co[pin_list] = hook_co
+            cloth.vel[pin_list] = 0
+
+        if ob.mc.clicked: # for the grab tool
+            cloth.co[extra_data['vidx']] = np.array(extra_data['stored_vidx']) + np.array(+ extra_data['move'])
+        
+        ob.data.shape_keys.key_blocks['modeling cloth key'].data.foreach_set('co', cloth.co.ravel())
+        ob.data.shape_keys.key_blocks['modeling cloth key'].mute = True
+        ob.data.shape_keys.key_blocks['modeling cloth key'].mute = False
 
     #except:
     #    print(sys.exc_info())
     #    print('ERROR: Cloth error! Updating cloth!')
     #    create_cloth_data(ob)
-    #    #if ob.mc.object_collision_detect:
-    #    #    for i, cp in enumerate(scene.mc.collider_pointers):
-    #    #        create_collider_data(cp.object)
 
 # +++++++++++++ object collisions ++++++++++++++
 def bounds_check(co1, co2, fudge):
@@ -1368,14 +1286,13 @@ def inside_triangles(tri_vecs, v2, co, tri_co_2, cidx, tidx, nor, ori, in_margin
 
 
 def object_collide(cloth_ob, col_ob):
-    #print('INFO: Beginning collision between', cloth_ob.name, 'and', col_ob.name)
     ###hits = False
     ###cloth.col_idx = np.empty(0, dtype=np.int32)
     ###cloth.collide_list = np.empty(0, dtype=np.int32)
-    # get transforms in world space:
     cloth = get_cloth_data(cloth_ob)
     col = get_collider_data(col_ob)
 
+    # get transforms in world space:
     proxy_in_place(col_ob, col)
     apply_in_place(cloth_ob, cloth.co, cloth)
     
@@ -1541,7 +1458,6 @@ def grid_sample(ob, tri_min, tri_max, box_count=10, offset=0.00001):
 
 
 def self_collide(ob):
-    #print('INFO: Beginning self collision of', ob.name)
     #return
     # get transforms in world space:
     cloth = get_cloth_data(ob)
@@ -1620,77 +1536,24 @@ def self_collide(ob):
 
 
 class ColliderData:
-    def __init__(self):
-        pass
-        #self.co = None
-        #self.cross_vecs = None
-        #self.normals = None
-        #self.origins = None
-        #self.tridex = None
-        #self.tridexer = None
-        #self.v_normals = None
-        #self.vel = None
-
-        #self.ob = None
-
+    pass
 
 def get_collider_data(ob):
-    #print('INFO: Getting collider data of', ob.name, '...')
     col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
-    #try:
-    #    col = col_data[ob.name]
-    #    print('Her yaa go!', col.ob)
-    #    return col
-    #except:
-    #    print(sys.exc_info())
-    #    # Search for possible name changes
-    #    for ob_name, c in col_data.items():
-    #        if c.ob == ob:
-
-    #            # Rename the key
-    #            col_data[ob.name] = col_data.pop(ob_name)
-    #            return col_data[ob.name]
-
-    ## If collider still not found
-    #return create_collider_data(ob)
 
     col = None
     for key, c in col_data.items():
-    #for c in col_data:
         if c.ob == ob:
             col = c
 
     if not col:
         col = create_collider_data(ob)
 
-    #print('Her yaa go!', col.ob)
-
     return col
 
 def create_collider_data(ob):
     # maybe fixed? !!! bug where first frame of collide uses empty data. Stuff goes flying.
-    #print('INFO: Creating collider data of', ob.name, '...')
     col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
-
-    # Try to get the collider data first
-    #try:
-    #    col =  col_data[ob.name]
-    #except:
-    #    # Search for possible name changes
-    #    col = None
-    #    for ob_name, c in col_data.items():
-    #        if c.ob == ob:
-
-    #            # Rename the key
-    #            col_data[ob.name] = col_data.pop(ob_name)
-    #            col = col_data[ob.name]
-    #            break
-
-    #    # If collider still not found
-    #    if not col:
-    #        col = ColliderData()
-    #        col_data[ob.name] = col
-    #        col.ob = ob
 
     col = ColliderData()
     col_data[ob.name] = col
@@ -1742,48 +1605,25 @@ def create_self_collider(ob):
 # collide object updater
 def collision_object_update(self, context):
     """Updates the collider object"""    
+    col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
     ob = self.id_data
     scene = context.scene
-    #extra_data = context.window_manager.modeling_cloth_data_set_extra
-    #col_data = context.window_manager.modeling_cloth_data_set_colliders
-    #collide = ob.mc.object_collision
-    #print(collide, "this is the collide state")
-    # remove objects from dict if deleted
-    #cull_list = []
-    #if 'colliders' in extra_data:
-    #    if extra_data['colliders'] is not None:   
-    #        if not collide:
-    #            print("not collide")
-    #            if ob.name in extra_data['colliders']:
-    #                print("name was here")
-    #                del(extra_data['colliders'][ob.name])
-    #        for i in extra_data['colliders']:
-    #            remove = True
-    #            if i in bpy.data.objects:
-    #                if bpy.data.objects[i].type == "MESH":
-    #                    if bpy.data.objects[i].mc.object_collision:
-    #                        remove = False
-    #            if remove:
-    #                cull_list.append(i)
-    #for i in cull_list:
-    #    del(extra_data['colliders'][i])
-
-    ## add class to dict if true.
-    #if collide:    
-    #    if 'colliders' not in extra_data:    
-    #        extra_data['colliders'] = {}
-    #    if extra_data['colliders'] is None:
-    #        extra_data['colliders'] = {}
-    #    extra_data['colliders'][ob.name] = create_collider_data(ob)
 
     if self.object_collision:
         cp = scene.mc.collider_pointers.add()
         cp.object = ob
-        #create_collider_data(ob)
-        #col_data[ob.name] = create_collider_data(ob)
     else:
         for i, cp in enumerate(scene.mc.collider_pointers):
             if cp.object == ob:
+
+                # Remove collider data first
+                cull_keys = []
+                for key, col in col_data.items():
+                    if col.ob == cp.object:
+                        cull_keys.append(key)
+                for key in cull_keys:
+                    del(col_data[key])
+
                 scene.mc.collider_pointers.remove(i)
                 break
     
@@ -1797,47 +1637,39 @@ def manage_animation_handler(self, context):
     ob = self.id_data
     if ob.mc.frame_update:
         ob.mc.scene_update = False
-        #create_cloth_data(ob)
     
         
 def manage_continuous_handler(self, context):    
     ob = self.id_data
     if ob.mc.scene_update:
         ob.mc.frame_update = False
-        #create_cloth_data(ob)
     
 
 # =================  Handler  ======================
 
 def handler_unified(scene, frame_update=False):
     data = bpy.context.window_manager.modeling_cloth_data_set
-    cull_ids = []
+    cull_obs = []
 
     for i, cp in enumerate(scene.mc.cloth_pointers):
         ob = cp.object
 
         # Check if object still exists
         if not ob or ob.users < 2:
-            cull_ids.append(i)
+            cull_obs.append(ob)
 
         elif ob.users == 2 and scene.mc.last_object == ob and not ob.mc.object_collision:
             scene.mc.last_object = None
-            cull_ids.append(i)
+            cull_obs.append(ob)
 
         elif ob.users == 2 and scene.mc.last_object != ob and ob.mc.object_collision:
-            for idx, p in enumerate(scene.mc.collider_pointers):
-                if p.object == ob:
-                    scene.mc.collider_pointers.remove(idx)
-                    break
-            cull_ids.append(i)
+            ob.mc.object_collision = False # Remove from collision list
+            cull_obs.append(ob)
 
         elif ob.users == 3 and scene.mc.last_object == ob and ob.mc.object_collision:
             scene.mc.last_object = None
-            for idx, p in enumerate(scene.mc.collider_pointers):
-                if p.object == ob:
-                    scene.mc.collider_pointers.remove(idx)
-                    break
-            cull_ids.append(i)
+            ob.mc.object_collision = False # Remove from collision list
+            cull_obs.append(ob)
 
         ## End checking
 
@@ -1855,23 +1687,9 @@ def handler_unified(scene, frame_update=False):
             elif not frame_update and ob.mc.scene_update:
                 run_handler(ob, cloth)
 
-    # Delete missing object pointer and cloth data
-    for i in reversed(cull_ids):
-        cp = scene.mc.cloth_pointers[i]
-        ob = cp.object
-
-        # Remove cloth data first
-        cull_keys = []
-        for key, cloth in data.items():
-            if ob == cloth.ob:
-            #if ob == key:
-                cull_keys.append(key)
-
-        for key in cull_keys:
-            del(data[key])
-
-        # Remove pointers
-        scene.mc.cloth_pointers.remove(i)
+    # Remove object from cloth pointer
+    for ob in cull_obs:
+        ob.mc.enable = False
 
 @persistent
 def handler_frame(scene):
@@ -1901,45 +1719,30 @@ def get_cloth_data(ob):
 def enable_cloth(self, context):
     ob = self.id_data
     scene = context.scene
-    #data = context.window_manager.modeling_cloth_data_set
+    data = context.window_manager.modeling_cloth_data_set
     extra_data = context.window_manager.modeling_cloth_data_set_extra
     scene.mc.last_object = ob
     
-    # object collisions
-    #colliders = [i for i in bpy.data.objects if i.mc.object_collision]
-    #if len(colliders) == 0:    
-    #    extra_data['colliders'] = None    
-    
-    # iterate through dict: for i, j in d.items()
     if ob.mc.enable:
         # New cloth on scene data
-        cl = scene.mc.cloth_pointers.add()
-        cl.object = ob
-        
-        #cloth = create_cloth_data(ob) # generate an instance of the class
-        #data[cloth.ob.name] = cloth  # store class in dictionary using the object name as a key
-        #cloth = create_cloth()
+        cp = scene.mc.cloth_pointers.add()
+        cp.object = ob
     else:
-        for i, cl in enumerate(scene.mc.cloth_pointers):
-            if cl.object == ob:
+        for i, cp in enumerate(scene.mc.cloth_pointers):
+            if cp.object == ob:
+
+                # Remove cloth data first
+                cull_keys = []
+                for key, cloth in data.items():
+                    if ob == cloth.ob:
+                        cull_keys.append(key)
+
+                for key in cull_keys:
+                    del(data[key])
+
+                # Remove pointers
                 scene.mc.cloth_pointers.remove(i)
     
-    #cull_keys = [] # can't delete dict items while iterating
-    #for key, value in data.items():
-    #    if not value.ob.mc.enable:
-    #        cull_keys.append(key) # store keys to delete
-
-    #for key in cull_keys:
-    #    del data[key]
-    
-#    # could keep the handler unless there are no modeling cloth objects active
-#    
-#    if handler_frame in bpy.app.handlers.frame_change_post:
-#        bpy.app.handlers.frame_change_post.remove(handler_frame)
-#    
-#    if len(data) > 0:
-#        bpy.app.handlers.frame_change_post.append(handler_frame)
-
 def visible_objects_and_duplis(context):
     """Loop over (object, matrix) pairs (mesh only)"""
 
@@ -1976,8 +1779,7 @@ class ModelingClothPin(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        data = context.window_manager.modeling_cloth_data_set
-        return context.space_data.type == 'VIEW_3D' and any(data)
+        return context.space_data.type == 'VIEW_3D' and any(context.scene.mc.cloth_pointers)
 
     def __init__(self):
         self.obj = None
@@ -2052,12 +1854,9 @@ class ModelingClothPin(bpy.types.Operator):
                 e.show_x_ray = True
                 e.select = True
                 e.empty_draw_size = .1
-                #cloth = get_cloth_data(self.obj)
                 pin = self.obj.mc.pins.add()
                 pin.vertex_id = self.closest
                 pin.hook = e
-                #cloth.pin_list.append(self.closest)
-                #cloth.hook_list.append(e)
                 self.latest_hit = None
                 self.obj = None
         
@@ -2087,8 +1886,7 @@ class ModelingClothDrag(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        data = context.window_manager.modeling_cloth_data_set
-        return context.space_data.type == 'VIEW_3D' and any(data)
+        return context.space_data.type == 'VIEW_3D' and any(context.scene.mc.cloth_pointers)
 
     def __init__(self):
         self.clicked = False
@@ -2097,7 +1895,6 @@ class ModelingClothDrag(bpy.types.Operator):
 
     def invoke(self, context, event):
         scene = context.scene
-        #data = context.window_manager.modeling_cloth_data_set
         extra_data = context.window_manager.modeling_cloth_data_set_extra
         scene.mc.drag_alert = True
         bpy.ops.object.select_all(action='DESELECT')    
@@ -2106,8 +1903,6 @@ class ModelingClothDrag(bpy.types.Operator):
         extra_data['stored_vidx'] = None # Vertex coordinates
         extra_data['move'] = None # Direction of drag
 
-        #for key, cloth in data.items():
-        #    cloth.clicked = False
         for cp in scene.mc.cloth_pointers:
             if cp.object:
                 cp.object.mc.clicked = False
@@ -2116,7 +1911,6 @@ class ModelingClothDrag(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
     def main_drag(self, context, event):
-        #print(self.clicked)
         # get the context arguments
         scene = context.scene
         extra_data = context.window_manager.modeling_cloth_data_set_extra
@@ -2151,9 +1945,6 @@ class ModelingClothDrag(bpy.types.Operator):
                         best_matrix = matrix
 
             if best_obj:
-                #data[best_obj.name].clicked = True
-                #cloth = get_cloth_data(best_obj)
-                #cloth.clicked = True
                 best_obj.mc.clicked = True
                 vidx = [v for v in best_obj.data.polygons[best_face_index].vertices]
                 vert = best_obj.data.shape_keys.key_blocks['modeling cloth key'].data
@@ -2275,16 +2066,6 @@ class PinSelected(bpy.types.Operator):
         return {'FINISHED'}
 
 
-#class UpdataPinWeights(bpy.types.Operator):
-#    """Update Pin Weights"""
-#    bl_idname = "object.modeling_cloth_update_pin_group"
-#    bl_label = "Modeling Cloth Update Pin Weights"
-#    bl_options = {'REGISTER', 'UNDO'}        
-#    def execute(self, context):
-#        update_pin_group()
-#        return {'FINISHED'}
-
-
 class GrowSource(bpy.types.Operator):
     """Grow Source Shape"""
     bl_idname = "object.modeling_cloth_grow"
@@ -2334,161 +2115,6 @@ class RemoveVirtualSprings(bpy.types.Operator):
         add_remove_virtual_springs(remove=True)
         return {'FINISHED'}
 
-# =================  Save & Load  ======================
-
-# TODO:
-# - Prevent handler to loop through all objects if data is empty V (already not happening)
-# - Make sure to save collider class
-# - Add option to not save dump
-# - Try to use CollectionProperty to track cloth objects
-# - Make all handlers persistent (need CollectionProperty implementation done)
-
-#DATA_DUMP_TEXT_NAME = '__modeling_cloth_data_dump_'
-#EXTRA_DATA_DUMP_TEXT_NAME = '__modeling_cloth_extra_data_dump_'
-
-# Blender type cannot natively pickled, so encode them in certain way
-#def encode_blender_type(key, val):
-#    if type(val) == bpy.types.Object:
-#        key = key + '___bpy.types.Object'
-#        val = val.name
-#    # Mathutil vector and matrix cannot be pickled
-#    elif type(val) == Vector:
-#        key = key + '___Vector'
-#        val = val.to_tuple()
-#    elif type(val) == Matrix:
-#        mat_copy = []
-#        for e in val:
-#            mat_copy.append(e.to_tuple())
-#        key = key + '___Matrix' 
-#        val = mat_copy
-#
-#    return key, val
-#
-#def decode_blender_type(key, val):
-#    if '___' in key:
-#        splits = key.split('___')
-#        key = splits[0]
-#        val_type = splits[1]
-#
-#        if val_type == 'bpy.types.Object':
-#            val = bpy.data.objects.get(val)
-#        elif val_type == 'Vector':
-#            val = Vector(val)
-#        elif val_type == 'Matrix':
-#            val = Matrix(val)
-#
-#        elif val_type == dict:
-#            for k, v in val.items():
-#                if type(v) == ColliderData:
-#                    pass
-#
-#    return key, val
-#
-#def create_data_copy():
-#    data = bpy.context.window_manager.modeling_cloth_data_set
-#
-#    data_copy = {}
-#    for ob_name, cloth in data.items():
-#        # Check if object still exists
-#        ob = bpy.data.objects.get(ob_name)
-#        if not ob: continue
-#        
-#        # Create cloth object copy
-#        cloth_copy = {}
-#        for attr in dir(cloth):
-#            if attr.startswith('__'): continue
-#            val = getattr(cloth, attr)
-#            key, val = encode_blender_type(attr, val)
-#            cloth_copy[key] = val
-#        data_copy[ob_name] = cloth_copy
-#
-#    return data_copy
-#
-#def create_extra_data_copy():
-#    extra_data = bpy.context.window_manager.modeling_cloth_data_set_extra
-#    extra_data_copy = {}
-#
-#    for key, val in extra_data.items():
-#        key, val = encode_blender_type(key, val)
-#        extra_data_copy[key] = val
-#
-#    return extra_data_copy
-#
-#@persistent
-#def save_cloth_data_set(scene):
-#    #if len(data.items()) == 0: 
-#    #    return
-#
-#    # Create a data copy because it can't be pickled directly
-#    data_copy = create_data_copy()
-#    extra_data_copy = create_extra_data_copy()
-#
-#    if not data_copy: return
-#
-#    # Dump data to bytes
-#    data_dumped = pickle.dumps(data_copy)
-#    extra_data_dumped = pickle.dumps(extra_data_copy)
-#
-#    # Encode them to string
-#    data_dumped_str = codecs.encode(data_dumped, "base64").decode()
-#    extra_data_dumped_str = codecs.encode(extra_data_dumped, "base64").decode()
-#
-#    # Get or create text
-#    data_text = bpy.data.texts.get(DATA_DUMP_TEXT_NAME)
-#    if not data_text: 
-#        data_text = bpy.data.texts.new(DATA_DUMP_TEXT_NAME)
-#    else: data_text.clear()
-#
-#    extra_data_text = bpy.data.texts.get(EXTRA_DATA_DUMP_TEXT_NAME)
-#    if not extra_data_text: 
-#        extra_data_text = bpy.data.texts.new(EXTRA_DATA_DUMP_TEXT_NAME)
-#    else: extra_data_text.clear()
-#
-#    # Write it
-#    data_text.write(data_dumped_str)
-#    extra_data_text.write(extra_data_dumped_str)
-
-#@persistent
-#def load_cloth_data_set(scene):
-#    # Reset datasets
-#    data = bpy.types.Scene.modeling_cloth_data_set = {} 
-#    extra_data = bpy.types.Scene.modeling_cloth_data_set_extra = {} 
-#
-#    data_text = bpy.data.texts.get(DATA_DUMP_TEXT_NAME)
-#    extra_data_text = bpy.data.texts.get(EXTRA_DATA_DUMP_TEXT_NAME)
-#
-#    if data_text:
-#
-#        data_dumped = codecs.decode(data_text.as_string().encode(), "base64")
-#        data_loaded = pickle.loads(data_dumped)
-#        for ob_name, cloth_copy in data_loaded.items():
-#            cloth = data[ob_name] = Cloth()
-#            for key, val in cloth_copy.items():
-#                key, val = decode_blender_type(key, val)
-#                setattr(cloth, key, val)
-#
-#        # Delete text
-#        bpy.data.texts.remove(data_text)
-#
-#    if extra_data_text:
-#        extra_data_dumped = codecs.decode(extra_data_text.as_string().encode(), "base64")
-#        extra_data_loaded = pickle.loads(extra_data_dumped)
-#        for key, val in extra_data_loaded.items():
-#            key, val = decode_blender_type(key, val)
-#            extra_data[key] = val
-#
-#        # Delete text
-#        bpy.data.texts.remove(extra_data_text)
-#
-#    # Add handlers
-#    #for ob in bpy.data.objects:
-#    #    if ob.mc.frame_update:
-#    #        if not handler_frame in bpy.app.handlers.frame_change_post:
-#    #            bpy.app.handlers.frame_change_post.append(handler_frame)
-#    #    elif ob.mc.scene_update:
-#    #        if not handler_scene in bpy.app.handlers.frame_change_post:
-#    #            bpy.app.handlers.frame_change_post.append(handler_scene)
-
 @persistent
 def refresh_cloth_data(scene):
     scene = bpy.context.scene
@@ -2523,7 +2149,7 @@ class ModelingClothGlobals(bpy.types.PropertyGroup):
     pin_alert = BoolProperty(default=False)
     last_object = PointerProperty(type=bpy.types.Object)
 
-class ModelingClothPin(bpy.types.PropertyGroup):
+class ModelingClothPinObject(bpy.types.PropertyGroup):
     vertex_id = IntProperty(default=-1)
     hook = PointerProperty(type=bpy.types.Object)
 
@@ -2655,11 +2281,8 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
     clicked = BoolProperty(name='Click for drag event',
             default=False)
 
-    #force_update = BoolProperty(name='Force cloth update on loop',
-    #        default = False)
-
     pins = CollectionProperty(name="Modeling Cloth Pins", 
-            type=ModelingClothPin)
+            type=ModelingClothPinObject)
 
     virtual_springs = CollectionProperty(name="Modeling Cloth Virtual Springs", 
             type=ModelingClothVirtualSpring)
@@ -2712,7 +2335,7 @@ class ModelingClothPanel(bpy.types.Panel):
                 #col = layout.column(align=True)
                 
                 if ob.mc.enable:
-                    col.label('Active: ' + ob.name)
+                    #col.label('Active: ' + ob.name)
                     col = layout.column(align=True)
                     col.scale_y = 2.0
 
@@ -2779,9 +2402,6 @@ class ModelingClothPanel(bpy.types.Panel):
                     col.prop(ob.mc ,"object_collision_inner_margin", text="Inner Margin", icon="STICKY_UVS_LOC")
                 
                 col.label("Collide List:")
-                #colliders = [i.name for i in bpy.data.objects if i.mc.object_collision]
-                #for i in colliders:
-                #    col.label(i)
                 for cp in scene.mc.collider_pointers:
                     if cp.object:
                         col.label(cp.object.name)
@@ -2855,16 +2475,12 @@ def register():
     bpy.app.handlers.frame_change_post.append(handler_frame)
     bpy.app.handlers.scene_update_post.append(handler_scene)
 
-    # Add save & load handlers
-    #bpy.app.handlers.save_pre.append(save_cloth_data_set)
-    #bpy.app.handlers.load_post.append(load_cloth_data_set)
+    # Add load handlers
     bpy.app.handlers.load_post.append(refresh_cloth_data)
 
 
 def unregister():
-    # Remove save & load handlers
-    #bpy.app.handlers.save_pre.remove(save_cloth_data_set)
-    #bpy.app.handlers.load_post.remove(load_cloth_data_set)
+    # Remove load handlers
     bpy.app.handlers.load_post.remove(refresh_cloth_data)
 
     # Remove main handlers
@@ -2876,6 +2492,7 @@ def unregister():
     # Unregister all classes if this file loaded individually
     if __name__ in {'__main__', 'ModelingCloth'}:
         bpy.utils.unregister_module(__name__)
+
     
 if __name__ == "__main__":
     register()
@@ -2885,15 +2502,7 @@ if __name__ == "__main__":
     # testing!!!!!!!!!!!!!!!!
 
 
-    
     for i in bpy.data.objects:
         i.mc.enable = False
         i.mc.object_collision = False
         
-    for i in bpy.app.handlers.frame_change_post:
-        if i.__name__ == 'handler_frame':
-            bpy.app.handlers.frame_change_post.remove(i)
-            
-    for i in bpy.app.handlers.scene_update_post:
-        if i.__name__ == 'handler_scene':
-            bpy.app.handlers.scene_update_post.remove(i)            
