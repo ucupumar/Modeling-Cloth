@@ -667,18 +667,19 @@ def check_and_get_pins_and_hooks(ob):
     hooks = []
     cull_ids = []
     for i, pin in enumerate(ob.mc.pins):
-        # Only one user means actual pin object already deleted
-        if pin.hook.users == 1:
+        # Check if hook object still exists
+        if not pin.hook or (pin.hook and not scene.objects.get(pin.hook.name)):
             cull_ids.append(i)
         else:
             #vert = ob.data.vertices[pin.vertex_id]
             pins.append(pin.vertex_id)
             hooks.append(pin.hook)
 
-    # Delete missing hooks data
-    for i in cull_ids:
+    # Delete missing hooks pointers 
+    for i in reversed(cull_ids):
         pin = ob.mc.pins[i]
-        bpy.data.objects.remove(pin.hook)
+        if pin.hook:
+            bpy.data.objects.remove(pin.hook)
         ob.mc.pins.remove(i)
 
     return pins, hooks
@@ -1091,11 +1092,11 @@ def run_handler(ob, cloth):
         # objects ---
         #T = time.time()
         if ob.mc.object_collision_detect:
-            cull_obs = []
+            cull_ids = []
             for i, cp in enumerate(scene.mc.collider_pointers):
-                # Delete pointers if object is deleted
-                if not cp.object or cp.object.users < 2: 
-                    cull_obs.append(cp.object)
+                # Check if object is still exists
+                if not cp.object or (cp.object and not scene.objects.get(cp.object.name)):
+                    cull_ids.append(i)
                     continue
 
                 if cp.object == ob:    
@@ -1124,9 +1125,13 @@ def run_handler(ob, cloth):
                             col = create_collider_data(cp.object)
                             object_collide(ob, cp.object)
 
-            # Remove collider object from pointer list
-            for o in cull_obs:
-                o.mc.object_collision = False
+            # Remove collider missing object from pointer list
+            for i in reversed(cull_ids):
+                o = scene.mc.collider_pointers[i].object
+                if o:
+                    o.mc.object_collision = False
+                else:
+                    scene.mc.collider_pointers.remove(i)
 
         #print(time.time()-T, "the whole enchalada")
         # objects ---
@@ -1649,27 +1654,17 @@ def manage_continuous_handler(self, context):
 
 def handler_unified(scene, frame_update=False):
     data = bpy.context.window_manager.modeling_cloth_data_set
-    cull_obs = []
+    #cull_obs = []
+    cull_ids = []
 
     for i, cp in enumerate(scene.mc.cloth_pointers):
         ob = cp.object
 
         # Check if object still exists
-        if not ob or ob.users < 2:
-            cull_obs.append(ob)
-
-        elif ob.users == 2 and scene.mc.last_object == ob and not ob.mc.object_collision:
-            scene.mc.last_object = None
-            cull_obs.append(ob)
-
-        elif ob.users == 2 and scene.mc.last_object != ob and ob.mc.object_collision:
-            ob.mc.object_collision = False # Remove from collision list
-            cull_obs.append(ob)
-
-        elif ob.users == 3 and scene.mc.last_object == ob and ob.mc.object_collision:
-            scene.mc.last_object = None
-            ob.mc.object_collision = False # Remove from collision list
-            cull_obs.append(ob)
+        if not ob or (ob and not scene.objects.get(ob.name)):
+            if scene.mc.last_object == ob:
+                scene.mc.last_object = None
+            cull_ids.append(i)
 
         ## End checking
 
@@ -1687,9 +1682,13 @@ def handler_unified(scene, frame_update=False):
             elif not frame_update and ob.mc.scene_update:
                 run_handler(ob, cloth)
 
-    # Remove object from cloth pointer
-    for ob in cull_obs:
-        ob.mc.enable = False
+    # Remove missing object from cloth pointer
+    for i in reversed(cull_ids):
+        ob = scene.mc.cloth_pointers[i].object
+        if ob:
+            ob.mc.enable = False
+        else:
+            scene.mc.cloth_pointers.remove(i)
 
 @persistent
 def handler_frame(scene):
