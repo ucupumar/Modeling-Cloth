@@ -1,19 +1,77 @@
-import bpy
+import bpy, bmesh, json
 import numpy as np
+from bpy.props import *
 from numpy import newaxis as nax
-import bmesh
+from bpy.app.handlers import persistent
 
 
 bl_info = {
     "name": "Dynamic Tension Map",
-    "author": "Rich Colburn, email: the3dadvantage@gmail.com",
+    "author": "Rich Colburn (email: the3dadvantage@gmail.com), Yusuf Umar (@ucupumar)",
     "version": (1, 0),
-    "blender": (2, 78, 0),
+    "blender": (2, 79, 0),
     "location": "View3D > Extended Tools > Tension Map",
     "description": "Compares the current state of the mesh agains a stored version and displays stretched edges as a color",
     "warning": "'For the empire!' should not be shouted when paying for gum.",
     "wiki_url": "",
     "category": '3D View'}
+
+MATERIAL_NAME = '__TensionMap'
+VCOL_NAME = '__Tension'
+
+def create_dynamic_tension_material():
+    '''Creates a node material for displaying the vertex colors'''
+    # Go to blender internal first
+    scene = bpy.context.scene
+    ori_engine = scene.render.engine
+
+    # Create internal material nodes
+    scene.render.engine = 'BLENDER_RENDER'
+    mat = bpy.data.materials.new(MATERIAL_NAME)
+    mat.use_nodes = True
+    mat.specular_intensity = 0.1
+    mat.specular_hardness = 17
+    mat.use_transparency = True
+
+    mat.node_tree.nodes.new(type="ShaderNodeGeometry")
+    mat.node_tree.links.new(
+        mat.node_tree.nodes['Geometry'].outputs['Vertex Color'], 
+        mat.node_tree.nodes['Material'].inputs[0])
+    mat.node_tree.nodes['Geometry'].color_layer = VCOL_NAME
+    mat.node_tree.nodes['Material'].material = mat
+
+    # Create cycles material nodes
+    scene.render.engine = 'CYCLES'
+    outp = mat.node_tree.nodes.new(type="ShaderNodeOutputMaterial")
+    diff = mat.node_tree.nodes.new(type="ShaderNodeBsdfDiffuse")
+    attr = mat.node_tree.nodes.new(type="ShaderNodeAttribute")
+    attr.attribute_name = VCOL_NAME
+
+    mat.node_tree.links.new(attr.outputs['Color'], diff.inputs[0])
+    mat.node_tree.links.new(diff.outputs['BSDF'], outp.inputs[0])
+
+    # Back to original engine
+    scene.render.engine = ori_engine
+
+    return mat
+
+
+def get_set_dynamic_tension_material(ob):
+
+    # Search for material in object data
+    mat = ob.data.materials.get(MATERIAL_NAME)
+    if not mat:
+        # If not found search for global data
+        mat = bpy.data.materials.get(MATERIAL_NAME)
+
+        # Create material if still not found
+        if not mat:
+            mat = create_dynamic_tension_material()
+
+        # Append material to object data
+        ob.data.materials.append(mat)
+
+    return mat
 
 
 def hide_unhide_store(ob=None, unhide=True, storage=None):
@@ -130,48 +188,46 @@ def get_bmesh(ob=None):
     return obm
 
 
-def material_setup(ob=None):
-    '''Creates a node material for displaying the vertex colors'''
-    if ob is None:
-        ob = bpy.context.object
-    mats = bpy.data.materials
-    tens = mats.new('TensionMap')
-    data[ob.name]['material'] = tens
-    tens.use_nodes = True
-    tens.specular_intensity = 0.1
-    tens.specular_hardness = 17
-    tens.use_transparency = True
-    tens.node_tree.nodes.new(type="ShaderNodeGeometry")
-    tens.node_tree.links.new(tens.node_tree.nodes['Geometry'].outputs['Vertex Color'], 
-        tens.node_tree.nodes['Material'].inputs[0])
-    if 'Tension' not in ob.data.vertex_colors:    
-        ob.data.vertex_colors.new('Tension')
-    ob.data.materials.append(tens)
-    tens.node_tree.nodes['Geometry'].color_layer = 'Tension'
-    tens.node_tree.nodes['Material'].material = tens
-
-
-def reassign_mats(ob=None, type=None):
+def reassign_mats(ob): #=None, type=None):
     '''Resets materials based on stored face indices'''
-    if ob is None:
-        ob = bpy.context.object
-    if type == 'off':
-        ob.data.polygons.foreach_set('material_index', data[ob.name]['mat_index'])
-        ob.data.update()
-        idx = ob.data.materials.find(data[ob.name]['material'].name)        
-        if idx != -1:    
-            ob.data.materials.pop(idx, update_data=True)
-        bpy.data.materials.remove(data[ob.name]['material'])
-        del(data[ob.name])    
-    if type == 'on':
-        idx = ob.data.materials.find(data[ob.name]['material'].name)
-        mat_idx = np.zeros(len(ob.data.polygons), dtype=np.int32) + idx
+    if ob.dten.enable:
+        idx = ob.data.materials.find(MATERIAL_NAME)
+        mat_idx = np.full(len(ob.data.polygons), idx, dtype=np.int32)
         ob.data.polygons.foreach_set('material_index', mat_idx)
         ob.data.update()
+    else:
+        mat_idx = json.loads(ob.dten.mat_index_str)
+        ob.data.polygons.foreach_set('material_index', mat_idx)
+        ob.data.update()
+        ob.dten.mat_index_str = ''
 
+        # Search for dynamic tension material then remove it
+        idx = ob.data.materials.find(MATERIAL_NAME)
+        if idx != -1:    
+            ob.data.materials.pop(idx, update_data=True)
 
-def initalize(ob, key):
+def initialize(ob): #, key):
     '''Set up the indexing for viewing each edge per vert per face loop'''
+    data = bpy.context.scene.dynamic_tension_map_dict
+    data[ob.name] = dtdata = {}
+
+    source = False
+    key = None
+
+    if ob.type != 'MESH': return
+        
+    keys = ob.data.shape_keys
+    if keys != None:
+        if 'RestShape' in keys.key_blocks:    
+            key = 'RestShape'
+        elif 'modeling cloth source key' in keys.key_blocks:
+            key = 'modeling cloth source key'
+            source = True
+        else:
+            key = keys.key_blocks[0].name
+
+    ob.dten.source = source
+
     obm = get_bmesh(ob)
     ed_pairs_per_v = []
     for f in obm.faces:
@@ -181,46 +237,65 @@ def initalize(ob, key):
                 if v in e.verts:
                     set.append(e.index)
             ed_pairs_per_v.append(set)    
-    data[ob.name]['ed_pairs_per_v'] = np.array(ed_pairs_per_v)
-    data[ob.name]['zeros'] = np.zeros(len(data[ob.name]['ed_pairs_per_v']) * 3).reshape(len(data[ob.name]['ed_pairs_per_v']), 3)
+
+    dtdata['ed_pairs_per_v'] = np.array(ed_pairs_per_v)
+    dtdata['zeros'] = np.zeros(len(dtdata['ed_pairs_per_v']) * 3).reshape(len(dtdata['ed_pairs_per_v']), 3)
+
     key_coords = get_key_coords(ob, key)
     ed1 = get_edge_idx(ob)
     #linked = np.array([len(i.link_faces) for i in obm.edges]) > 0
-    data[ob.name]['edges'] = get_edge_idx(ob)#[linked]
-    dif = key_coords[data[ob.name]['edges'][:,0]] - key_coords[data[ob.name]['edges'][:,1]]
-    data[ob.name]['mags'] = np.sqrt(np.einsum('ij,ij->i', dif, dif))
+    dtdata['edges'] = get_edge_idx(ob)#[linked]
+    dif = key_coords[dtdata['edges'][:,0]] - key_coords[dtdata['edges'][:,1]]
+    dtdata['mags'] = np.sqrt(np.einsum('ij,ij->i', dif, dif))
+
+    # Store original material index
     mat_idx = np.zeros(len(ob.data.polygons), dtype=np.int64)
     ob.data.polygons.foreach_get('material_index', mat_idx)
-    data[ob.name]['mat_index'] = mat_idx
-    if 'material' not in data[ob.name]:
-        print('ran this')
-        material_setup(ob)
+    mat_idx_str = json.dumps(mat_idx.tolist())
+    ob.dten.mat_index_str = mat_idx_str
 
+    #if 'material' not in dtdata:
+    print('ran this')
+    get_set_dynamic_tension_material(ob)
 
+    print('INFO: Dynamic tension data for', ob.name, 'is created!')
+
+    return dtdata
+
+@persistent
+def refresh_dynamic_tension_data(scene):
+    data = bpy.context.scene.dynamic_tension_map_dict
+    for i, op in enumerate(bpy.context.scene.dten.object_pointers):
+        if op.object:
+            #data[op.object.name] = initialize(op.object)
+            initialize(op.object)
+
+@persistent
 def dynamic_tension_handler(scene):
-    stretch = bpy.context.scene.dynamic_tension_map_max_stretch / 100
-    items = data.items()
-    if len(items) == 0:
-        for i in bpy.data.objects:
-            i.dynamic_tension_map_on = False
-        
-        for i in bpy.app.handlers.scene_update_post:
-            if i.__name__ == 'dynamic_tension_handler':
-                bpy.app.handlers.scene_update_post.remove(i)
-    
-    for i, value in items:    
-        if i in bpy.data.objects:
-            update(ob=bpy.data.objects[i], max_stretch=stretch, bleed=0.2)   
-        else:
-            del(data[i])
-            break
+    scene = bpy.context.scene
+    data = scene.dynamic_tension_map_dict
+    stretch = scene.dten.max_stretch / 100
 
+    cull_ids = []
+    for i, op in enumerate(bpy.context.scene.dten.object_pointers):
+        if op.object and scene.objects.get(op.object.name):
+            update(ob=op.object, max_stretch=stretch, bleed=0.2)   
+        else:
+            cull_ids.append(i)
+
+    for i in reversed(cull_ids):
+        cp = scene.dten.object_pointers[i]
+
+        if cp.object and cp.object.name in data:
+            del(data[cp.object.name])
+
+        scene.dten.object_pointers.remove(i)
 
 def prop_callback(self, context):
-    stretch = bpy.context.scene.dynamic_tension_map_max_stretch / 100
+    stretch = bpy.context.scene.dten.max_stretch / 100
     edit=False
     ob = bpy.context.object
-    if not ob.dynamic_tension_map_on:
+    if not ob.dten.enable:
         return
     if ob.mode == 'EDIT':
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -234,28 +309,34 @@ def update(coords=None, ob=None, max_stretch=1, bleed=0.2):
     '''Measure the edges against the stored lengths.
     Look up those distances with fancy indexing on
     a per-vertex basis.'''
+    scene = bpy.context.scene
+    data = scene.dynamic_tension_map_dict
     if ob is None:
         ob = bpy.context.object
+    try:
+        dtdata = data[ob.name]
+    except: 
+        dtdata = initialize(ob)
     
-    if data[ob.name]['source']:
+    if ob.dten.source:
         coords = get_key_coords(ob, 'modeling cloth key')
-    if bpy.context.scene.dynamic_tension_map_show_from_flat:
+    if scene.dten.show_from_flat:
         if ob.data.shape_keys is not None:
             if len(ob.data.shape_keys.key_blocks) > 1:
                 coords = get_key_coords(ob, ob.data.shape_keys.key_blocks[1].name)
     if coords is None:
         coords = get_coords(ob, ob)
         
-    dif = coords[data[ob.name]['edges'][:,0]] - coords[data[ob.name]['edges'][:,1]]
+    dif = coords[dtdata['edges'][:,0]] - coords[dtdata['edges'][:,1]]
     mags = np.sqrt(np.einsum('ij,ij->i', dif, dif))
-    if bpy.context.scene.dynamic_tension_map_percentage:    
-        div = (mags / data[ob.name]['mags']) - 1
+    if scene.dten.map_percentage:    
+        div = (mags / dtdata['mags']) - 1
     else:
-        div = mags - data[ob.name]['mags']
-    color = data[ob.name]['zeros']
+        div = mags - dtdata['mags']
+    color = dtdata['zeros']
     eye = np.eye(3,3)
     G, B = eye[1], eye[2]
-    ed_pairs = data[ob.name]['ed_pairs_per_v']
+    ed_pairs = dtdata['ed_pairs_per_v']
     mix = np.mean(div[ed_pairs], axis=1)
     mid = (max_stretch) * 0.5     
     BG_range = mix < mid
@@ -275,115 +356,124 @@ def update(coords=None, ob=None, max_stretch=1, bleed=0.2):
     color[GR_range] += GR_blend
 
     UV = np.nan_to_num(color / np.sqrt(np.einsum('ij,ij->i', color, color)[:, nax]))
-    ob.data.vertex_colors["Tension"].data.foreach_set('color', UV.ravel())
+    ob.data.vertex_colors[VCOL_NAME].data.foreach_set('color', UV.ravel())
     ob.data.update()
+
+
+def toggle_enable(self, context):
+    if type(self) == bpy.types.Object: 
+        ob = self
+    else: 
+        ob = self.id_data
+    scene = context.scene
+    data = scene.dynamic_tension_map_dict
+
+    if ob.dten.enable:
+
+        # Set object vertex color
+        if VCOL_NAME not in ob.data.vertex_colors:    
+            ob.data.vertex_colors.new(VCOL_NAME)
+
+        initialize(ob)
+        op = scene.dten.object_pointers.add()
+        op.object = ob
+    else:
+        # Remove vertex color
+        vcol = ob.data.vertex_colors.get(VCOL_NAME)
+        if vcol:
+            ob.data.vertex_colors.remove(vcol)
+
+        # Remove pointer and data
+        for i, op in enumerate(scene.dten.object_pointers):
+            if op.object == ob:
+                if ob.name in data:
+                    del(data[ob.name])
+                scene.dten.object_pointers.remove(i)
+                break
+
+    reassign_mats(ob)
+    prop_callback(context.scene, bpy.context)
+
+    # Change viewport shade to material
+    context.space_data.viewport_shade = 'MATERIAL'
     
-
-def toggle_display(self, context):
-    global data
-    data = bpy.context.scene.dynamic_tension_map_dict
-    source = False
-    use_key = False
-    if self.type == 'MESH':
-        
-        keys = self.data.shape_keys
-        if keys != None:
-            if 'RestShape' in keys.key_blocks:    
-                key = 'RestShape'
-    
-            elif 'modeling cloth source key' in keys.key_blocks:
-                key = 'modeling cloth source key'
-                source = True
-            else:
-                key = keys.key_blocks[0].name
-
-            use_key = True
-                
-        if self.dynamic_tension_map_on:
-            # to avoid duplicating the material:
-            mat = None
-            if self.name in data:
-                if 'material' in data[self.name]:
-                    mat = data[self.name]['material']
-            
-            #---
-            data[self.name] = {}
-            data[self.name]['source'] = source
-            if mat is not None:    
-                data[self.name]['material'] = mat
-            if use_key:    
-                initalize(self, key)
-            else:
-                initalize(self, None)
-            reassign_mats(self, 'on')
-            self.data.vertex_colors['Tension'].active = True
-        else:
-            if self.name in data:
-                reassign_mats(self, 'off')
-        
-        prop_callback(bpy.context.scene, bpy.context)
-        
-        for i in bpy.app.handlers.scene_update_post:
-            if i.__name__ == 'dynamic_tension_handler':
-                return
-
-        bpy.app.handlers.scene_update_post.append(dynamic_tension_handler)        
-
 
 def pattern_on_off(self, context):
-    if self.dynamic_tension_flat_pattern_on:
-        self.data.shape_keys.key_blocks[1].value = 1
-        self.active_shape_key_index = 1
+    ob = self.id_data
+    if ob.dten.flat_pattern_on:
+        ob.data.shape_keys.key_blocks[1].value = 1
+        ob.active_shape_key_index = 1
         
     else:
-        self.data.shape_keys.key_blocks[1].value = 0
-        self.active_shape_key_index = 0
+        ob.data.shape_keys.key_blocks[1].value = 0
+        ob.active_shape_key_index = 0
 
 def tension_from_flat_update(self, context):
-    toggle_display(bpy.context.object, context)
-    prop_callback(bpy.context.scene, bpy.context)
+    #toggle_enable(context.object, context)
+    #prop_callback(context.scene, context)
+    pass
 
         
 # Create Properties----------------------------:
 def percentage_prop_update(self, context):
-    if self.dynamic_tension_map_percentage:
-        self['dynamic_tension_map_edge'] = False
+    scene = self.id_data
+    if scene.dten.map_percentage:
+        scene.dten.map_edge = False
     else:
-        self['dynamic_tension_map_edge'] = True        
+        scene.dten.map_edge = True        
 
     
 def edge_prop_update(self, context):
-    if self.dynamic_tension_map_edge:
-        self['dynamic_tension_map_percentage'] = False
+    scene = self.id_data
+    if scene.dten.map_edge:
+        scene.dten.map_percentage = False
     else:
-        self['dynamic_tension_map_percentage'] = True
+        scene.dten.map_percentage = True
 
-        
-def create_properties():            
-    
-    bpy.types.Object.dynamic_tension_map_on = bpy.props.BoolProperty(name="Dynamic Tension Map On", 
+class DynamicTensionObjectPointer(bpy.types.PropertyGroup):
+    object = PointerProperty(type=bpy.types.Object)
+
+class DynamicTensionObjectProps(bpy.types.PropertyGroup):
+
+    enable = BoolProperty(name="Dynamic Tension Map On", 
         description="Amount of stretch on an edge is blender units. ", 
-        default=False, update=toggle_display)
+        default=False, update=toggle_enable)
 
-    bpy.types.Scene.dynamic_tension_map_max_stretch = bpy.props.FloatProperty(name="avatar height", 
-        description="Stretch distance where tension map appears red", default=20, min=0.001, max=200,  precision=2, update=prop_callback)
-
-    bpy.types.Scene.dynamic_tension_map_percentage = bpy.props.BoolProperty(name="Dynamic Tension Map Percentage", 
-        description="For toggling between percentage and geometry", 
-        default=True, update=percentage_prop_update)
-
-    bpy.types.Scene.dynamic_tension_map_edge = bpy.props.BoolProperty(name="Dynamic Tension Map Edge", 
-        description="For toggling between percentage and geometry", 
-        default=False, update=edge_prop_update)
-
-    bpy.types.Scene.dynamic_tension_map_show_from_flat = bpy.props.BoolProperty(name="Dynamic Tension From Flat", 
-        description="Tension is displayed as the difference between the current shape and the source shape.", 
-        default=False, update=tension_from_flat_update)
-
-    bpy.types.Object.dynamic_tension_flat_pattern_on = bpy.props.BoolProperty(name="Dynamic Tension Flat Pattern On", 
+    flat_pattern_on = BoolProperty(name="Dynamic Tension Flat Pattern On", 
         description="Toggles the flat pattern shape on and off.", 
         default=False, update=pattern_on_off)
 
+    # mat_index
+    mat_index_str = StringProperty(default='')
+
+    source = BoolProperty(default=False)
+
+class DynamicTensionSceneProps(bpy.types.PropertyGroup):
+
+    max_stretch = FloatProperty(name="avatar height", 
+        description="Stretch distance where tension map appears red", 
+        default=20, min=0.001, max=200,  precision=2, update=prop_callback)
+
+    show_from_flat = BoolProperty(name="Dynamic Tension From Flat", 
+        description="Tension is displayed as the difference between the current shape and the source shape.", 
+        default=False, update=tension_from_flat_update)
+
+    map_percentage = BoolProperty(name="Dynamic Tension Map Percentage", 
+        description="For toggling between percentage and geometry", 
+        default=True, update=percentage_prop_update)
+
+    map_edge = BoolProperty(name="Dynamic Tension Map Edge", 
+        description="For toggling between percentage and geometry", 
+        default=False, update=edge_prop_update)
+
+    object_pointers = CollectionProperty(type=DynamicTensionObjectPointer)
+
+        
+def create_properties():            
+
+    bpy.types.Object.dten = PointerProperty(type=DynamicTensionObjectProps)
+    bpy.types.Scene.dten = PointerProperty(type=DynamicTensionSceneProps)
+    
     # create data dictionary
     bpy.types.Scene.dynamic_tension_map_dict = {}
     bpy.types.Scene.dynamic_tension_map_selection = {}
@@ -391,13 +481,6 @@ def create_properties():
 
 def remove_properties():
         
-    del(bpy.types.Object.dynamic_tension_map_on)
-    del(bpy.types.Scene.dynamic_tension_map_max_stretch)
-    del(bpy.types.Scene.dynamic_tension_map_percentage)
-    del(bpy.types.Scene.dynamic_tension_map_edge)
-    del(bpy.types.Scene.dynamic_tension_map_show_from_flat)
-    del(bpy.types.Object.dynamic_tension_flat_pattern_on)
-    
     del(bpy.types.Scene.dynamic_tension_map_dict)
     del(bpy.types.Scene.dynamic_tension_map_selection)
 
@@ -410,8 +493,9 @@ class UpdatePattern(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
         ob = bpy.context.object
-        edit = True
+        edit = False
         if ob.mode == 'EDIT':
+            edit = True
             bpy.ops.object.mode_set(mode='OBJECT')
         storage = bpy.context.scene.dynamic_tension_map_selection
         hide_unhide_store(ob, True, storage)
@@ -419,8 +503,8 @@ class UpdatePattern(bpy.types.Operator):
         hide_unhide_store(ob, False, storage)
         if edit:
             bpy.ops.object.mode_set(mode='EDIT')            
-        toggle_display(bpy.context.object, context)
-        prop_callback(bpy.context.scene, bpy.context)
+        #toggle_enable(bpy.context.object, context)
+        #prop_callback(bpy.context.scene, bpy.context)
         return {'FINISHED'}
 
 
@@ -434,29 +518,30 @@ class DynamicTensionMap(bpy.types.Panel):
     gt_show = True
     
     def draw(self, context):
+        scene = context.scene
         layout = self.layout
         col = layout.column()
         col.label(text="Dynamic Tension Map")
         ob = bpy.context.object
         if ob is not None:
-            if ob.dynamic_tension_map_on:    
+            if ob.dten.enable:    
                 col.alert=True
             if ob.type == 'MESH':
-                col.prop(ob ,"dynamic_tension_map_on", text="Toggle Dynamic Tension Map", icon='MOD_TRIANGULATE')
+                col.prop(ob.dten ,"enable", text="Toggle Dynamic Tension Map", icon='MOD_TRIANGULATE')
                 col = layout.column()
-                col.prop(bpy.context.scene ,"dynamic_tension_map_max_stretch", text="Max Stretch", slider=True)
+                col.prop(scene.dten ,"max_stretch", text="Max Stretch", slider=True)
                 col = layout.column(align=True)
-                col.prop(bpy.context.scene ,"dynamic_tension_map_show_from_flat", text="Show Tension From Flat", icon='MESH_GRID')
+                col.prop(scene.dten ,"show_from_flat", text="Show Tension From Flat", icon='MESH_GRID')
                 if ob.data.shape_keys is not None:
                     if len(ob.data.shape_keys.key_blocks) > 1:
-                        col.prop(ob ,"dynamic_tension_flat_pattern_on", text="Show Pattern", icon='OUTLINER_OB_LATTICE')
+                        col.prop(ob.dten ,"flat_pattern_on", text="Show Pattern", icon='OUTLINER_OB_LATTICE')
                         col = layout.column()
                         col.scale_y = 2.0
                         col.operator("object.dynamic_tension_map_update_pattern", text="Update Pattern")
                 col = layout.column(align=True)
 
-                #col.prop(bpy.context.scene ,"dynamic_tension_map_percentage", text="Percentage Based", icon='STICKY_UVS_VERT')
-                #col.prop(bpy.context.scene ,"dynamic_tension_map_edge", text="Edge Difference", icon='UV_VERTEXSEL')        
+                #col.prop(scene.dten ,"map_percentage", text="Percentage Based", icon='STICKY_UVS_VERT')
+                #col.prop(scene.dten ,"map_edge", text="Edge Difference", icon='UV_VERTEXSEL')        
                 return
             
         col.label(text="Select Mesh Object")
@@ -469,13 +554,21 @@ def register():
     # Register all classes if this file loaded individually
     if __name__ in {'__main__', 'DynamicTensionMap'}:
         bpy.utils.register_module(__name__)
-    
+
+    bpy.app.handlers.scene_update_post.append(dynamic_tension_handler)
+
+    # Add load handlers
+    bpy.app.handlers.load_post.append(refresh_dynamic_tension_data)
+
 
 def unregister():
+
+    # Add load handlers
+    bpy.app.handlers.load_post.remove(refresh_dynamic_tension_data)
+
+    bpy.app.handlers.scene_update_post.remove(dynamic_tension_handler)
+
     remove_properties()
-    for i in bpy.app.handlers.scene_update_post:
-        if i.__name__ == 'dynamic_tension_handler':
-            bpy.app.handlers.scene_update_post.remove(i)
 
     # Unregister all classes if this file loaded individually
     if __name__ in {'__main__', 'DynamicTensionMap'}:
@@ -485,10 +578,3 @@ def unregister():
 if __name__ == "__main__":
     register()
     
-    
-    for i in bpy.data.objects:
-        i.dynamic_tension_map_on = False
-    
-    for i in bpy.app.handlers.scene_update_post:
-        if i.__name__ == 'dynamic_tension_handler':
-            bpy.app.handlers.scene_update_post.remove(i)    
