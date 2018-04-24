@@ -692,8 +692,6 @@ def create_cloth_data(ob): #, new=True):
     #cloth.eidx = uni_edges[0][0]
     cloth.sew_edges = uni_edges[2]
 
-    #if cloth.virtual_springs.shape[0] > 0:
-        #cloth.eidx = np.append(cloth.eidx, cloth.virtual_springs, axis=0)
     if len(ob.mc.virtual_springs) > 0:
         virtual_springs = np.array([[vs.vertex_id_1, vs.vertex_id_2] for vs in ob.mc.virtual_springs])
         cloth.eidx = np.append(cloth.eidx, virtual_springs, axis=0)
@@ -1372,7 +1370,6 @@ def get_collider_data(ob):
     return col
 
 def create_collider_data(ob):
-    # maybe fixed? !!! bug where first frame of collide uses empty data. Stuff goes flying.
     col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
 
     col = ColliderData()
@@ -1402,6 +1399,7 @@ def create_collider_data(ob):
     col.origins.dtype = np.float32
     #col.normals.dtype = np.float32
 
+    # remove proxy
     bpy.data.meshes.remove(proxy)
 
     print('INFO: Collider data for', ob.name, 'is created!')
