@@ -7,23 +7,29 @@
 # to do:
 #  use point raycaster to make a cloth_wrap option
 #  fix multiple sew spring error
-#  set up better indexing so that edges only get calculated once
 #  self colisions
+    # maybe do dynamic margins for when cloth is moving fast
 #  object collisions
+    # collisions need to properly exclude pinned and vertex pinned
 #  add bending springs
 #  add curl by shortening bending springs on one axis or diagonal
 #  independantly scale bending springs and structural to create buckling
-#  run on frame update as an option?
 #  option to cache animation?
-#  collisions need to properly exclude pinned and vertex pinned
-#  virtual springs do something wierd to the velocity
-#  multiple converging springs go to far. Need to divide by number of springs at a vert or move them all towards a mean
 
-# now!!!!
-#  refresh self collisions.
+
+# BAD BUGS !!!
+# Proxy ram issues:
+#   when creating a deleting proxy mesh with shape keys shape keys are building up in ram
+#   using proxy on cloth just for wind and inflate so I can use foreach_get v_normals. Could do my own normals and eliminate proxy
+#   will have to use proxy on avatar to pick up armature anims. If avatar has shape keys will be an issue. Won't need if we're just storing animation data and sending it out
+
+# Cloth collisions:
+#   cloth self collisions get weird if the cloth is not in rest position when collide is clicked on
+#   cloth is still using proxy settings for self collisions. Can turn off mods before creating proxy but still have shape key ram issue
+
 
 # collisions:
-# Onlny need to check on of the edges for groups connected to a vertex    
+# Only need to check one of the edges for groups connected to a vertex    
 # for edge to face intersections...
 # figure out where the edge hit the face
 # figure out which end of the edge is inside the face
@@ -33,6 +39,10 @@
 
 
 '''??? Would it make sense to do self collisions with virtual edges ???'''
+'''??? Could do dynamic collision margins for stuff moving fast ???'''
+
+
+
 
 bl_info = {
     "name": "Modeling Cloth",
@@ -57,7 +67,12 @@ from mathutils import *
 import time
 import sys
 
-AUTO_UPDATE_WHEN_ERROR_HAPPENS = True
+AUTO_UPDATE_WHEN_ERROR_HAPPENS = False
+
+#enable_numexpr = True
+enable_numexpr = False
+if enable_numexpr:
+    import numexpr as ne
 
 you_have_a_sense_of_humor = False
 #you_have_a_sense_of_humor = True
@@ -79,22 +94,19 @@ def get_co(ob, arr=None, key=None): # key
     return arr
 
 
-def get_proxy_co(ob, arr):
+def get_proxy_co(ob, arr, me):
     """Returns vertex coords with modifier effects as N x 3"""
-    me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     if arr is None:
         arr = np.zeros(len(me.vertices) * 3, dtype=np.float32)
         arr.shape = (arr.shape[0] //3, 3)    
     c = arr.shape[0]
     me.vertices.foreach_get('co', arr.ravel())
-    bpy.data.meshes.remove(me)
     arr.shape = (c, 3)
     return arr
 
 
-def triangulate(ob):
+def triangulate(ob, me):
     """Requires a mesh. Returns an index array for viewing co as triangles"""
-    me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     obm = bmesh.new()
     obm.from_mesh(me)        
     bmesh.ops.triangulate(obm, faces=obm.faces)
@@ -102,7 +114,6 @@ def triangulate(ob):
     count = len(me.polygons)    
     tri_idx = np.zeros(count * 3, dtype=np.int64)        
     me.polygons.foreach_get('vertices', tri_idx)        
-    bpy.data.meshes.remove(me)
     obm.free()
     return tri_idx.reshape(count, 3)
 
@@ -131,11 +142,11 @@ def closest_points_edge(vec, origin, p):
     return cp, d
 
 
-def proxy_in_place(ob, col):
+def proxy_in_place(ob, me, col):
     """Overwrite vert coords with modifiers in world space"""
-    me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
+    #me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     me.vertices.foreach_get('co', col.co.ravel())
-    bpy.data.meshes.remove(me)
+    #bpy.data.meshes.remove(me)
     col.co = apply_transforms(ob, col.co)
 
 
@@ -147,22 +158,18 @@ def apply_rotation(ob, col):
     col.v_normals = col.v_normals @ mat
     
 
-def proxy_v_normals_in_place(ob, col, world=True):
+def proxy_v_normals_in_place(ob, col, world=True, me=None):
     """Overwrite vert coords with modifiers in world space"""
-    me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     me.vertices.foreach_get('normal', col.v_normals.ravel())
-    bpy.data.meshes.remove(me)
     if world:    
         apply_rotation(ob, col)
 
 
-def proxy_v_normals(ob):
+def proxy_v_normals(ob, me):
     """Overwrite vert coords with modifiers in world space"""
-    me = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
     arr = np.zeros(len(me.vertices) * 3, dtype=np.float32)
     me.vertices.foreach_get('normal', arr)
     arr.shape = (arr.shape[0] //3, 3)
-    bpy.data.meshes.remove(me)
     m = np.array(ob.matrix_world, dtype=np.float32)    
     mat = m[:3, :3].T # rotates backwards without T
     return arr @ mat
@@ -238,7 +245,7 @@ def get_last_object():
     return None, None
 
 
-def get_poly_centers(ob, type=np.float32):
+def get_poly_centers(ob, type=np.float32, mesh=None):
     mod = False
     m_count = len(ob.modifiers)
     if m_count > 0:
@@ -247,12 +254,10 @@ def get_poly_centers(ob, type=np.float32):
         ob.modifiers.foreach_get('show_render', show)
         ob.modifiers.foreach_set('show_render', ren_set)
         mod = True
-    mesh = ob.to_mesh(bpy.context.scene, True, 'RENDER')
     p_count = len(mesh.polygons)
     center = np.zeros(p_count * 3)#, dtype=type)
     mesh.polygons.foreach_get('center', center)
     center.shape = (p_count, 3)
-    bpy.data.meshes.remove(mesh)
     if mod:
         ob.modifiers.foreach_set('show_render', show)
 
@@ -265,7 +270,7 @@ def simple_poly_centers(ob, key=None):
         return np.squeeze([[np.mean([ob.data.vertices[i].co for i in p.vertices], axis=0)] for p in ob.data.polygons])
 
 
-def get_poly_normals(ob, type=np.float32):
+def get_poly_normals(ob, type=np.float32, mesh=None):
     mod = False
     m_count = len(ob.modifiers)
     if m_count > 0:
@@ -274,19 +279,17 @@ def get_poly_normals(ob, type=np.float32):
         ob.modifiers.foreach_get('show_render', show)
         ob.modifiers.foreach_set('show_render', ren_set)
         mod = True
-    mesh = ob.to_mesh(bpy.context.scene, True, 'RENDER')
     p_count = len(mesh.polygons)
     normal = np.zeros(p_count * 3)#, dtype=type)
     mesh.polygons.foreach_get('normal', normal)
     normal.shape = (p_count, 3)
-    bpy.data.meshes.remove(mesh)
     if mod:
         ob.modifiers.foreach_set('show_render', show)
 
     return normal
 
 
-def get_v_normals(ob, arr):
+def get_v_normals(ob, arr, mesh):
     """Since we're reading from a shape key we have to use
     a proxy mesh."""
     mod = False
@@ -297,16 +300,12 @@ def get_v_normals(ob, arr):
         ob.modifiers.foreach_get('show_render', show)
         ob.modifiers.foreach_set('show_render', ren_set)
         mod = True
-    mesh = ob.to_mesh(bpy.context.scene, True, 'RENDER')
     #v_count = len(mesh.vertices)
     #normal = np.zeros(v_count * 3)#, dtype=type)
     mesh.vertices.foreach_get('normal', arr.ravel())
     #normal.shape = (v_count, 3)
-    bpy.data.meshes.remove(mesh)
     if mod:
         ob.modifiers.foreach_set('show_render', show)
-
-    #return normal
 
 
 def get_v_nor(ob, nor_arr):
@@ -322,66 +321,6 @@ def closest_point_edge(e1, e2, p):
     cp = e1 + vec1 * d 
     return cp
 
-
-def generate_collision_data(ob, pins, means):
-    """The mean of each face is treated as a point then
-    checked against the cpoe of the normals of every face.
-    If the distance between the cpoe and the center of the face
-    it's checking is in the margin, do a second check to see
-    if it's also in the virtual cylinder around the normal.
-    If it's in the cylinder, back up along the normal until the
-    point is on the surface of the cylinder.
-    instead of backing up along the normal, could do a line-plane intersect
-    on the path of the point against the normal. 
-    
-    Since I know the direction the points are moving... it might be possible
-    to identify the back sides of the cylinders so the margin on the back
-    side is infinite. This way I could never miss the collision.
-    !!! infinite backsides !!! Instead... since that would work because
-    there is no way to tell the difference between a point that's moving
-    away from the surface and a point that's already crossed the surface...
-    I could do a raycast onto the infinte plane of the normal still treating
-    it like a cylinder so instead of all the inside triangle stuff, just check
-    the distance from the intersection to the cpoe of the normal
-    
-    Get cylinder sizes by taking the center of each face,
-    and measuring the distance to it's closest neighbor, then back up a bit
-    
-    !!!could save the squared distance around the cylinders and along the normal 
-    to save a step while checking... !!!
-    """
-    
-    # one issue: oddly shaped triangles can cause gaps where face centers could pass through
-    # since both sids are being checked it's less likely that both sides line up and pass through the gap
-    obm = bmesh.new()
-    obm.from_mesh(ob.data)
-
-    obm.faces.ensure_lookup_table()
-    obm.verts.ensure_lookup_table()
-    p_count = len(obm.faces)
-    
-    per_face_v =  [[v.co for v in f.verts] for f in obm.faces]
-    
-    # $$$$$ calculate means with add.at like it's set up already$$$$$
-    #means = np.array([np.mean([v.co for v in f.verts], axis=0) for f in obm.faces], dtype=np.float32)
-    ### !!! calculating means from below wich is dynamic. Might be better since faces change size anyway. Could get better collisions
-
-    # get sqared distance to closest vert in each face. (this will still work if the mesh isn't flat)
-    sq_dist = []
-    for i in range(p_count):
-        dif = np.array(per_face_v[i]) - means[i]
-        sq_dist.append(np.min(np.einsum('ij,ij->i', dif, dif)))
-    
-    # neighbors for excluding point face collisions.
-    neighbors = np.tile(np.ones(p_count, dtype=np.bool), (pins.shape[0], 1))
-    #neighbors = np.tile(pins, (pins.shape[0], 1))
-    p_neighbors = [[f.index for f in obm.verts[p].link_faces] for p in pins]
-    for x in range(neighbors.shape[0]):
-        neighbors[x][p_neighbors[x]] = False
-
-    # returns the radius distance from the mean to the closest vert in the polygon
-    return np.array(np.sqrt(sq_dist), dtype=np.float32), neighbors
-        
 
 def create_vertex_groups(groups=['common', 'not_used'], weights=[0.0, 0.0], ob=None):
     '''Creates vertex groups and sets weights. "groups" is a list of strings
@@ -432,7 +371,6 @@ def get_minimal_edges(ob):
 
     # get diagonal edges:
     diag_eidx = []
-    print('new============')
     start = 0
     stop = 0
     step_size = [len(i.verts) for i in obm.faces]
@@ -458,7 +396,7 @@ def get_minimal_edges(ob):
     
     # eidx groups
     sew_eidx = eidx[e_bool]
-    lin_eidx = eidx[-e_bool]
+    lin_eidx = eidx[~e_bool]
     diag_eidx = np.array(diag_eidx)
         
     return lin_eidx, diag_eidx, sew_eidx
@@ -625,8 +563,6 @@ def get_spring_mix(ob, eidx):
         rs.append (min(r,l))
         ls.append (min(r,l))
     mix = 1 / np.array(rs + ls, dtype=np.float32) ** 1.2
-    #mix2 = 1 / np.array(rs + ls)
-    #print(mix.shape, "mix shape")
     
     return mix
         
@@ -712,6 +648,10 @@ def create_cloth_data(ob): #, new=True):
             data[ob.name] = cloth
             cloth.ob = ob
 
+    # get proxy object
+    proxy = ob.to_mesh(bpy.context.scene, False, 'PREVIEW')
+    # ----------------
+
     scene = bpy.context.scene
     scene.objects.active = ob
     
@@ -741,7 +681,7 @@ def create_cloth_data(ob): #, new=True):
         except RuntimeError:
             # assign a weight of zero
             ob.vertex_groups['modeling_cloth_pin'].add(range(0,len(ob.data.vertices)), 0.0, 'REPLACE')
-    cloth.pin_bool = -np.array([ob.vertex_groups['modeling_cloth_pin'].weight(i) for i in range(cloth.count)], dtype=np.bool)
+    cloth.pin_bool = ~np.array([ob.vertex_groups['modeling_cloth_pin'].weight(i) for i in range(cloth.count)], dtype=np.bool)
 
     # unique edges------------>>>
     uni_edges = get_minimal_edges(ob)
@@ -793,10 +733,13 @@ def create_cloth_data(ob): #, new=True):
     cloth.vel.shape = (cloth.count, 3)
     cloth.vel_start = np.zeros(cloth.count * 3, dtype=np.float32)
     cloth.vel_start.shape = (cloth.count, 3)
+
+    cloth.self_col_vel = np.copy(co)
     
     # Normals
     cloth.v_normals = np.zeros(co.shape, dtype=np.float32)
-    get_v_normals(ob, cloth.v_normals)
+    #get_v_normals(ob, cloth.v_normals)
+    get_v_normals(ob, cloth.v_normals, proxy)
 
     # Wind
     cloth.wind = np.zeros(co.shape, dtype=np.float32)
@@ -810,53 +753,21 @@ def create_cloth_data(ob): #, new=True):
     #cloth.waiting = False
     #cloth.clicked = False # for the grab tool
     
+    # this helps with extra springs behaving as if they had more mass---->>>
+    cloth.mix = mixology[cloth.unpinned][:, nax]
     # -------------->>>
 
     # new self collisions:
+    cloth.tridex = triangulate(ob, proxy)
 
-    cloth.tridex = triangulate(ob)
     cloth.tridexer = np.arange(cloth.tridex.shape[0], dtype=np.int32)
+    # -------------->>>
 
-    c_peat = np.repeat(np.arange(cloth.idxer.shape[0], dtype=np.int16), cloth.tridexer.shape[0])
-    t_peat = np.tile(np.arange(cloth.tridexer.shape[0], dtype=np.int16), co.shape[0])
-
-    # eliminate tris that contain the point:
-    co_tidex = c_peat.reshape(cloth.idxer.shape[0], cloth.tridexer.shape[0])
-    tri_tidex = cloth.tridex[t_peat.reshape(cloth.idxer.shape[0], cloth.tridexer.shape[0])]
-    check = tri_tidex == co_tidex[:,:,nax]
-    cull = ~np.any(check, axis=2)
-    
-    # duplicate of each tri for each vert and each vert for each tri
-    cloth.c_peat = c_peat[cull.ravel()]
-    cloth.t_peat = t_peat[cull.ravel()]
-
-    
-    self_col = ob.mc.self_collision
-    if self_col:
-        # collision======:
-        # collision======:
-        cloth.p_count = len(ob.data.polygons)
-        #cloth.p_means = get_poly_centers(ob)
-        cloth.p_means = simple_poly_centers(ob, key="modeling cloth source key")
-
-        
-        # could put in a check in case int 32 isn't big enough...
-        cloth.cy_dists, cloth.point_mean_neighbors = generate_collision_data(ob, cloth.pindexer, cloth.p_means)
-        cloth.cy_dists *= ob.mc.self_collision_cy_size
-        
-        nei = cloth.point_mean_neighbors.ravel() # eliminate neighbors for point in face check
-        cloth.v_repeater = np.repeat(cloth.pindexer, cloth.p_count)[nei]
-        cloth.p_repeater = np.tile(np.arange(cloth.p_count, dtype=np.int32),(cloth.count,))[nei]
-        cloth.bool_repeater = np.ones(cloth.p_repeater.shape[0], dtype=np.bool)
-        
-        cloth.mean_idxer = np.arange(cloth.p_count, dtype=np.int32)
-        cloth.mean_tidxer = np.tile(cloth.mean_idxer, (cloth.count, 1))
-        
-        # collision======:
-        # collision======:
-
-    
     bpy.ops.object.mode_set(mode=mode)
+
+    # remove proxy
+    bpy.data.meshes.remove(proxy)
+
     print('INFO: Cloth data for', ob.name, 'is created!')
     return cloth
 
@@ -918,8 +829,8 @@ def run_handler(ob, cloth):
             div = np.nan_to_num(sdots / dots)
             swap = vecs * np.sqrt(div)[:, nax]
             move = vecs - swap
-            # pull only test--->>>
-            #move[div > 1] = 0
+
+            # pull separate test--->>>
             push = ob.mc.push_springs
             if push == 0:
                 move[div > 1] = 0
@@ -929,15 +840,8 @@ def run_handler(ob, cloth):
             
             tiled_move = np.append(move, -move, axis=0)[cloth.unpinned] * mix # * mix for stability: force multiplied by 1/number of springs
 
-            #print(np.unique(cloth.eidx_tiler))
-            
-            #tiled_move = np.append(move, -move, axis=0)[cloth.unpinned] * new_mix # * mix for stability: force multiplied by 1/number of springs
             np.add.at(cloth.co, cloth.eidx_tiler, tiled_move)
 
-            ###if ob.mc.object_collision_detect:
-                ###if cloth.collide_list.shape[0] > 0:
-                    ###cloth.co[cloth.col_idx] = cloth.collide_list
-            
             if pin_list:
                 cloth.co[pin_list] = hook_co
             
@@ -950,7 +854,12 @@ def run_handler(ob, cloth):
         cloth.vel += revert_rotation(ob, np.array([0, 0, grav]))
 
         # refresh normals for inflate and wind
-        get_v_normals(ob, cloth.v_normals)
+        #get_v_normals(ob, cloth.v_normals)
+
+        # get proxy object
+        proxy = ob.to_mesh(bpy.context.scene, False, 'PREVIEW')
+        #proxy = ob.data
+        get_v_normals(ob, cloth.v_normals, proxy)
 
         # wind:
         x = ob.mc.wind_x
@@ -965,8 +874,8 @@ def run_handler(ob, cloth):
             cloth.v_normals *= inflate
             cloth.vel += cloth.v_normals
 
-        #cloth.vel += spring_dif * 4                    
         # inextensible calc:
+
         ab_dot = np.einsum('ij, ij->i', cloth.vel, spring_dif)
         aa_dot = np.einsum('ij, ij->i', spring_dif, spring_dif)
         div = np.nan_to_num(ab_dot / aa_dot)
@@ -974,97 +883,15 @@ def run_handler(ob, cloth):
         cloth.vel -= np.nan_to_num(cp)
         cloth.vel += (spring_dif + cp)
         
+        # !!! need to test if this should be added again here!!!
         cloth.vel += spring_dif        
+        # !!! need to test if this should be added again here!!!
 
         # The amount of drag increases with speed. 
         # have to converto to a range between 0 and 1
         squared_move_dist = np.einsum("ij, ij->i", cloth.vel, cloth.vel)
         squared_move_dist += 1
         cloth.vel *= (1 / (squared_move_dist / ob.mc.velocity))[:, nax]
-        
-        # old self collisions
-        self_col = ob.mc.self_collision
-
-        if self_col:
-            V3 = [] # because I'm multiplying the vel by this value and it doesn't exist unless there are collisions
-            col_margin = ob.mc.self_collision_margin
-            sq_margin = col_margin ** 2
-            
-            cloth.p_means = get_poly_centers(ob)
-            
-            #======== collision tree---
-            # start with the greatest dimension(if it's flat on the z axis, it will return everything so start with an axis with the greatest dimensions)
-            order = np.argsort(ob.dimensions) # last on first since it goes from smallest to largest
-            axis_1 = cloth.co[:, order[2]]
-            axis_2 = cloth.co[:, order[1]]
-            axis_3 = cloth.co[:, order[0]]
-            center_1 = cloth.p_means[:, order[2]]
-            center_2 = cloth.p_means[:, order[1]]
-            center_3 = cloth.p_means[:, order[0]]
-            
-            V = cloth.v_repeater # one set of verts for each face
-            P = cloth.p_repeater # faces repeated in order to aling to v_repearter
-            
-            check_1 = np.abs(axis_1[V] - center_1[P]) < cloth.cy_dists[P]
-            V1 = V[check_1]
-            P1 = P[check_1]
-            C1 = cloth.cy_dists[P1]
-            
-            check_2 = np.abs(axis_2[V1] - center_2[P1]) < C1
-            
-            V2 = V1[check_2]
-            P2 = P1[check_2]
-            C2 = C1[P2]            
-
-            check_3 = np.abs(axis_3[V2] - center_3[P2]) < C2
-
-            v_hits = V2[check_3]
-            p_hits = P2[check_3]
-            #======== collision tree end ---
-            if p_hits.shape[0] > 0:        
-                # now do closest point edge with points on normals
-                normals = get_poly_normals(ob)[p_hits]
-                
-                base_vecs = cloth.co[v_hits] - cloth.p_means[p_hits]
-                d = np.einsum('ij,ij->i', base_vecs, normals) / np.einsum('ij,ij->i', normals, normals)        
-                cp = normals * d[:, nax]
-                
-                # now measure the distance along the normal to see if it's in the cylinder
-                
-                cp_dot = np.einsum('ij,ij->i', cp, cp)
-                in_margin = cp_dot < sq_margin
-                
-                if in_margin.shape[0] > 0:
-                    V3 = v_hits[in_margin]
-                    #P3 = p_hits[in_margin]
-                    cp3 = cp[in_margin]
-                    cpd3 = cp_dot[in_margin]
-                    
-                    d1 = sq_margin
-                    d2 = cpd3
-                    div = d1/d2
-                    surface = cp3 * np.sqrt(div)[:, nax]
-
-                    force = np.nan_to_num(surface - cp3)
-                    force *= ob.mc.self_collision_force
-                    
-                    cloth.co[V3] += force
-
-                    cloth.vel[V3] *= .2                   
-                    #np.add.at(cloth.co, V3, force * .5)
-                    #np.multiply.at(cloth.vel, V3, 0.2)
-                    
-                    # could get some speed help by iterating over a dict maybe
-                    #if False:    
-                    #if True:    
-                        #for i in range(len(P3)):
-                            #cloth.co[cloth.v_per_p[P3[i]]] -= force[i]
-                            #cloth.vel[cloth.v_per_p[P3[i]]] -= force[i]
-                            #cloth.vel[cloth.v_per_p[P3[i]]] *= 0.2
-                            #cloth.vel[cloth.v_per_p[P3[i]]] += cloth.vel[V3[i]]
-                            #need to transfer the velocity back and forth between hit faces.
-
-        #collision=====================================
 
 
         if ob.mc.sew != 0:
@@ -1075,7 +902,6 @@ def run_handler(ob, cloth):
                 sew_vecs = (rs - ls) * 0.5 * ob.mc.sew
                 co[sew_edges[:,1]] -= sew_vecs
                 co[sew_edges[:,0]] += sew_vecs
-
         
         # floor ---
         if ob.mc.floor:    
@@ -1100,19 +926,16 @@ def run_handler(ob, cloth):
                     continue
 
                 if cp.object == ob:    
-                    # Does nothing because it will cause error if using modifier
-                    pass 
-
-                    #if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
-                    #    self_collide(ob)
-                    #else:
-                    #    try:
-                    #       self_collide(ob)
-                    #    except:
-                    #        print(sys.exc_info())
-                    #        print('ERROR: Collider error! Updating to new collider data!')
-                    #        col = create_collider_data(ob)
-                    #        self_collide(ob)
+                    if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
+                        self_collide(ob)
+                    else:
+                        try:
+                           self_collide(ob)
+                        except:
+                            print(sys.exc_info())
+                            print('ERROR: Collider error! Updating to new collider data!')
+                            col = create_collider_data(ob)
+                            self_collide(ob)
                 else:    
                     if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
                         object_collide(ob, cp.object)
@@ -1147,6 +970,11 @@ def run_handler(ob, cloth):
         ob.data.shape_keys.key_blocks['modeling cloth key'].mute = True
         ob.data.shape_keys.key_blocks['modeling cloth key'].mute = False
 
+        # remove proxy
+        #proxy.user_clear()
+        bpy.data.meshes.remove(proxy)
+        #del(proxy)
+
     #except:
     #    print(sys.exc_info())
     #    print('ERROR: Cloth error! Updating cloth!')
@@ -1171,7 +999,7 @@ def bounds_check(co1, co2, fudge):
     return check, co1_min, co1_max # might as well reuse the checks
 
 
-def triangle_bounds_check(co, tri_co, co_min, co_max, idxer, fudge):
+def triangle_bounds_check(tri_co, co_min, co_max, idxer, fudge):
     """Returns a bool aray indexing the triangles that
     intersect the bounds of the object"""
 
@@ -1207,18 +1035,96 @@ def tri_back_check(co, tri_min, tri_max, idxer, fudge):
     in_min[idx[~in_max]] = False    
     
     return in_min 
-    
 
+
+# -------------------------------------------------------
+# -------------------------------------------------------
+def zxy_grid(co_y, tymin, tymax, subs, c, t, c_peat, t_peat):
+    # create linespace grid between bottom and top of tri z
+    #subs = 7
+    t_min = np.min(tymin)
+    t_max = np.max(tymax)
+    divs = np.linspace(t_min, t_max, num=subs, dtype=np.float32)            
+    
+    # figure out which triangles and which co are in each section
+    co_bools = (co_y > divs[:-1][:, nax]) & (co_y < divs[1:][:, nax])
+    tri_bools = (tymin < divs[1:][:, nax]) & (tymax > divs[:-1][:, nax])
+
+    for i, j in zip(co_bools, tri_bools):
+        if (np.sum(i) > 0) & (np.sum(j) > 0):
+            c3 = c[i]
+            t3 = t[j]
+        
+            c_peat.append(np.repeat(c3, t3.shape[0]))
+            t_peat.append(np.tile(t3, c3.shape[0]))
+
+
+def zx_grid(co_x, txmin, txmax, subs, c, t, c_peat, t_peat, co_y, tymin, tymax):
+    # create linespace grid between bottom and top of tri z
+    #subs = 7
+    t_min = np.min(txmin)
+    t_max = np.max(txmax)
+    divs = np.linspace(t_min, t_max, num=subs, dtype=np.float32)            
+    
+    # figure out which triangles and which co are in each section
+    co_bools = (co_x > divs[:-1][:, nax]) & (co_x < divs[1:][:, nax])
+    tri_bools = (txmin < divs[1:][:, nax]) & (txmax > divs[:-1][:, nax])
+
+    for i, j in zip(co_bools, tri_bools):
+        if (np.sum(i) > 0) & (np.sum(j) > 0):
+            c2 = c[i]
+            t2 = t[j]
+            
+            zxy_grid(co_y[i], tymin[j], tymax[j], subs, c2, t2, c_peat, t_peat)
+
+
+def z_grid(co_z, tzmin, tzmax, subs, co_x, txmin, txmax, co_y, tymin, tymax):
+    # create linespace grid between bottom and top of tri z
+    #subs = 7
+    t_min = np.min(tzmin)
+    t_max = np.max(tzmax)
+    divs = np.linspace(t_min, t_max, num=subs, dtype=np.float32)
+            
+    # figure out which triangles and which co are in each section
+    co_bools = (co_z > divs[:-1][:, nax]) & (co_z < divs[1:][:, nax])
+    tri_bools = (tzmin < divs[1:][:, nax]) & (tzmax > divs[:-1][:, nax])
+
+    c_ranger = np.arange(co_bools.shape[1])
+    t_ranger = np.arange(tri_bools.shape[1])
+
+    c_peat = []
+    t_peat = []
+
+    for i, j in zip(co_bools, tri_bools):
+        if (np.sum(i) > 0) & (np.sum(j) > 0):
+            c = c_ranger[i]
+            t = t_ranger[j]
+
+            zx_grid(co_x[i], txmin[j], txmax[j], subs, c, t, c_peat, t_peat, co_y[i], tymin[j], tymax[j])
+    
+    if (len(c_peat) == 0) | (len(t_peat) == 0):
+        return None, None
+    
+    return np.hstack(c_peat), np.hstack(t_peat)
+# -------------------------------------------------------
+# -------------------------------------------------------    
+
+    
+"""Combined with numexpr the first check min and max is faster
+    Combined without numexpr is slower. It's better to separate min and max"""
 def v_per_tri(co, tri_min, tri_max, idxer, tridexer, c_peat=None, t_peat=None):
     """Checks each point against the bounding box of each triangle"""
+
+    co_x, co_y, co_z = co[:, 0], co[:, 1], co[:, 2]
     
+    subs = 7
+    #subs = bpy.data.objects['Plane.002'].mc.grid_size
+    
+    c_peat, t_peat = z_grid(co_z, tri_min[:, 2], tri_max[:, 2], subs, co_x, tri_min[:, 0], tri_max[:, 0], co_y, tri_min[:, 1], tri_max[:, 1])
     if c_peat is None:
-        c_peat = np.repeat(np.arange(idxer.shape[0], dtype=np.int16), tridexer.shape[0])
-        t_peat = np.tile(np.arange(tridexer.shape[0], dtype=np.int16), co.shape[0])
-    
+        return
     # X
     # Step 1 check x_min (because we're N squared here we break it into steps)
-    co_x = co[:, 0]
     check_x_min = co_x[c_peat] > tri_min[:, 0][t_peat]
     c_peat = c_peat[check_x_min]
     if c_peat.shape[0] == 0:
@@ -1234,7 +1140,6 @@ def v_per_tri(co, tri_min, tri_max, idxer, tridexer, c_peat=None, t_peat=None):
     
     # Y
     # Step 3 check y min    
-    co_y = co[:, 1]
     check_y_min = co_y[c_peat] > tri_min[:, 1][t_peat]
     c_peat = c_peat[check_y_min]
     if c_peat.shape[0] == 0:
@@ -1247,10 +1152,9 @@ def v_per_tri(co, tri_min, tri_max, idxer, tridexer, c_peat=None, t_peat=None):
     if c_peat.shape[0] == 0:
         return
     t_peat = t_peat[check_y_max]
-        
+
     # Z
     # Step 5 check z min    
-    co_z = co[:, 2]
     check_z_min = co_z[c_peat] > tri_min[:, 2][t_peat]
     c_peat = c_peat[check_z_min]
     if c_peat.shape[0] == 0:
@@ -1265,9 +1169,10 @@ def v_per_tri(co, tri_min, tri_max, idxer, tridexer, c_peat=None, t_peat=None):
     t_peat = t_peat[check_z_max]    
 
     return idxer[c_peat], t_peat
+    #return c_peat, t_peat
 
 
-def inside_triangles(tri_vecs, v2, co, tri_co_2, cidx, tidx, nor, ori, in_margin):
+def inside_triangles(tri_vecs, v2, co, tri_co_2, cidx, tidx, nor, ori, in_margin, self=None):
     idxer = np.arange(in_margin.shape[0], dtype=np.int32)[in_margin]
     
     r_co = co[cidx[in_margin]]    
@@ -1286,43 +1191,45 @@ def inside_triangles(tri_vecs, v2, co, tri_co_2, cidx, tidx, nor, ori, in_margin
     div = 1 / (d00 * d11 - d01 * d01)
     u = (d11 * d02 - d01 * d12) * div
     v = (d00 * d12 - d01 * d02) * div
-    check = (u > 0) & (v > 0) & (u + v < 1)
+    
+    # !!! Watch out for this number. It could affect speed !!! 
+    self = .03
+    if self:
+        check = (u > -self) & (v > -self) & (u + v < self + 1)
+    else:
+        check = (u > 0) & (v > 0) & (u + v < 1)
     in_margin[idxer] = check
 
 
 def object_collide(cloth_ob, col_ob):
-    ###hits = False
-    ###cloth.col_idx = np.empty(0, dtype=np.int32)
-    ###cloth.collide_list = np.empty(0, dtype=np.int32)
     cloth = get_cloth_data(cloth_ob)
     col = get_collider_data(col_ob)
 
+    proxy = col_ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
+
     # get transforms in world space:
-    proxy_in_place(col_ob, col)
+    proxy_in_place(col_ob, proxy, col)
     apply_in_place(cloth_ob, cloth.co, cloth)
     
-    inner_margin = col.ob.mc.object_collision_inner_margin
-    outer_margin = col.ob.mc.object_collision_outer_margin
+    inner_margin = col_ob.mc.object_collision_inner_margin
+    outer_margin = col_ob.mc.object_collision_outer_margin
     fudge = max(inner_margin, outer_margin)
-    #fudge = outer_margin# * 2
-    
+
     # check object bounds: (need inner and out margins to adjust box size)
     box_check, co1_min, co1_max = bounds_check(cloth.co, col.co, fudge)
 
-    # check for triangles inside the cloth bounds
     if box_check:
-        proxy_v_normals_in_place(col_ob, col)
+        proxy_v_normals_in_place(col_ob, col, True, proxy)
         tri_co = col.co[col.tridex]
-
-        # tri vel
         tri_vo = col.vel[col.tridex]
-        tris_in, tri_min, tri_max = triangle_bounds_check(cloth.co, tri_co, co1_min, co1_max, col.tridexer, fudge)
+
+        tris_in, tri_min, tri_max = triangle_bounds_check(tri_co, co1_min, co1_max, col.tridexer, fudge)#, object.ob.dimensions)
 
         # check for verts in the bounds around the culled triangles
         if np.any(tris_in):    
             tri_co_2 = tri_co[tris_in]
             back_check = tri_back_check(cloth.co, tri_min, tri_max, cloth.idxer, fudge)
-    
+
             # begin every vertex co against every tri
             if np.any(back_check):
                 v_tris = v_per_tri(cloth.co[back_check], tri_min, tri_max, cloth.idxer[back_check], col.tridexer[tris_in])
@@ -1332,6 +1239,7 @@ def object_collide(cloth_ob, col_ob):
                     # move the surface along the vertex normals by the outer margin distance
                     marginalized = (col.co + col.v_normals * outer_margin)[col.tridex]
                     tri_normals_in_place(col_ob, col, marginalized)
+
                     # add normals to make extruded tris
                     norms_2 = col.normals[tris_in]
                     u_norms = norms_2 / np.sqrt(np.einsum('ij, ij->i', norms_2, norms_2))[:, nax] 
@@ -1351,194 +1259,101 @@ def object_collide(cloth_ob, col_ob):
                     
                     if np.any(in_margin):
                         # collision response --------------------------->>>
-                        # when we only compute the velocity for points that hit,
-                        # we get weird velocity vectors when moving in and out
-                        # of collision space
+                        #if anim:    
+                        t_in = tidx[in_margin]
+                        
                         tri_vo = tri_vo[tris_in]
-                        tri_vel1 = np.mean(tri_co_2[tidx[in_margin]], axis=1)
-                        tri_vel2 = np.mean(tri_vo[tidx[in_margin]], axis=1)
+                        tri_vel1 = np.mean(tri_co_2[t_in], axis=1)
+                        tri_vel2 = np.mean(tri_vo[t_in], axis=1)
                         tvel = tri_vel1 - tri_vel2
-                        tri_vo[:] = 0
-                        
-                        
-                        
+
                         col_idx = cidx[in_margin] 
-                        #u, ind = np.unique(col_idx, True)
                         cloth.co[col_idx] -= nor[in_margin] * (d[in_margin])[:, nax]
-                        #cloth.co[u] -= nor[in_margin][ind] * (d[in_margin][ind])[:, nax]
                         cloth.vel[col_idx] = tvel
-                        #cloth.vel[col_idx] = 0
-                        #cloth.vel[u] = tvel[ind]
-                        # when iterating springs, we keep putting the collided points back
-                        ###cloth.col_idx = col_idx
-                        ###cloth.collide_list = cloth.co[col_idx]
-                        ###hits = True                    
-                # could use the mean of the original trianlge to determine which face
-                #   to collide with when there are multiples. So closest mean gets used.
+
     col.vel[:] = col.co    
     revert_in_place(cloth_ob, cloth.co)
-    ###if hits:
-        ###cloth.collide_list = cloth.co[col_idx]
+    bpy.data.meshes.remove(proxy)
 
-# update functions --------------------->>>    
-
-
-
-def grid_sample(ob, tri_min, tri_max, box_count=10, offset=0.00001):
-    """divide mesh into grid and sample from each segment.
-    offset prevents boxes from excluding any verts"""
-
-    # I have to eliminate tris containing the vertex
-    # I have boxes containing verts
-    # I have min and max corners of each tri
-    # I have to check every tri whose bounding box intersects the box with the vert
-    # If a vert is in a box, all the tris containing it are in that box
-
-
-    #ob = cloth.ob
-    cloth = get_cloth_data(ob)
-    co = cloth.co
-    #co = get_co(ob)
-    
-    # get bounding box corners
-    min = np.min(co, axis=0)
-    max = np.max(co, axis=0)
-    
-    # box count is based on largest dimension
-    dimensions = max - min
-    largest_dimension = np.max(dimensions)
-    box_size = largest_dimension / box_count
-    
-    # get box count for each axis
-    xyz_count = dimensions // box_size + 1 #(have to add one so we don't end up with zero boxes when the mesh is flat)
-    
-    # dynamic number of boxes on each axis:
-    box_dimensions = dimensions / xyz_count # each box is this size
-    
-    line_end = max - box_dimensions # we back up one from the last value
-    
-    x_line = np.linspace(min[0], line_end[0], num=xyz_count[0], dtype=np.float32)
-    y_line = np.linspace(min[1], line_end[1], num=xyz_count[1], dtype=np.float32)
-    z_line = np.linspace(min[2], line_end[2], num=xyz_count[2], dtype=np.float32)
-    
-    
-    idxer = np.arange(co.shape[0])
-    
-    # get x bools
-    x_grid = co[:, 0] - x_line[:,nax]
-    x_bools = (x_grid + offset > 0) & (x_grid - offset < box_dimensions[0])
-    cull_x_bools = x_bools[np.any(x_bools, axis=1)] # eliminate grid sections with nothing
-    xb = cull_x_bools
-
-    x_idx = np.tile(idxer, (xyz_count[0], 1))
-    
-    samples = []
-    
-    for boo in xb:
-        xidx = idxer[boo]
-        y_grid = co[boo][:, 1] - y_line[:,nax]
-        y_bools = (y_grid + offset > 0) & (y_grid - offset < box_dimensions[1])
-        cull_y_bools = y_bools[np.any(y_bools, axis=1)] # eliminate grid sections with nothing
-        yb = cull_y_bools
-        #print(yb[0].shape, "++++++what's my shape here?")
-        #print(yb[0][yb[0]].shape, "what's my shape here?")
-        for yboo in yb:
-            yidx = xidx[yboo]
-            z_grid = co[yidx][:, 2] - z_line[:,nax]
-            z_bools = (z_grid + offset > 0) & (z_grid - offset < box_dimensions[2])
-            cull_z_bools = z_bools[np.any(z_bools, axis=1)] # eliminate grid sections with nothing
-            zb = cull_z_bools        
-            for zboo in zb:
-                #samples.append(yidx[zboo][0])
-            
-                # !!! to use this for collisions !!!:
-                #if False:    
-                samples.extend([yidx[zboo].tolist()])
-
-    
-    #print(samples[:10], "what are these?")
-    for i in samples[40]:
-        ob.data.vertices[i].select=True
-    return np.unique(samples) # if offset is zero we don't need unique... return samples
-
-
+# self collider =============================================
 def self_collide(ob):
     #return
     # get transforms in world space:
     cloth = get_cloth_data(ob)
     col = get_collider_data(ob)
 
-    fudge = col.ob.mc.object_collision_outer_margin
+    margin = ob.mc.object_collision_outer_margin
+    fudge = margin
 
-    #proxy_v_normals_in_place(col, False)
     tri_co = cloth.co[cloth.tridex]
 
-    # tri vel
-    tri_vo = cloth.vel[cloth.tridex]
-
-
     tri_min = np.min(tri_co, axis=1) - fudge
-    tri_max = np.max(tri_co, axis=1) + fudge
+    tri_max = np.max(tri_co, axis=1) + fudge    
+    tri_normals_in_place(ob, col, tri_co)
 
-    #T = time.time()
-    #
-    #v_tris = v_per_tri(cloth.co, tri_min, tri_max, cloth.idxer, cloth.tridexer, cloth.c_peat, cloth.t_peat)
-    #x = grid_sample(ob, tri_min, tri_max, box_count=10, offset=0.00001)
-    #print(time.time()-T, "time inside")
-    #print(cloth.t_peat)
-    #print(cloth.c_peat)
-    
-    
-    return
+    # begin every vertex co against every tri
+    v_tris = v_per_tri(cloth.co, tri_min, tri_max, cloth.idxer, cloth.tridexer)
     if v_tris is not None:
-        # update the normals. cross_vecs used by barycentric tri check
-        # move the surface along the vertex normals by the outer margin distance
-        tri_normals_in_place(ob, col, tri_co)
-        # add normals to make extruded tris
-        u_norms = norms_2 / np.sqrt(np.einsum('ij, ij->i', norms_2, norms_2))[:, nax] 
-                            
         cidx, tidx = v_tris
-        ori = col.origins[tris_in][tidx]
+
+        norms = col.normals
+        u_norms = norms / np.sqrt(np.einsum('ij, ij->i', norms, norms))[:, nax] 
+
+        # don't check faces the verts are part of        
+        check_neighbors = cidx[:, nax] == col.tridex[tidx]
+        cull = np.any(check_neighbors, axis=1)
+        cidx, tidx = cidx[~cull], tidx[~cull]
+
+        ori = col.origins[tidx]
+
         nor = u_norms[tidx]
         vec2 = cloth.co[cidx] - ori
         
         d = np.einsum('ij, ij->i', nor, vec2) # nor is unit norms
-        in_margin = (d > -inner_margin) & (d < 0)#< outer_margin)
-        
+        in_margin = (d > -margin) & (d < margin)
+
         # <<<--- Inside triangle check --->>>
         # will overwrite in_margin:
-        cross_2 = col.cross_vecs[tris_in][tidx][in_margin]
-        inside_triangles(cross_2, vec2[in_margin], cloth.co, marginalized[tris_in], cidx, tidx, nor, ori, in_margin)
-        
+        cross_2 = col.cross_vecs[tidx][in_margin]
+        inside_triangles(cross_2, vec2[in_margin], cloth.co, tri_co, cidx, tidx, nor, ori, in_margin)
         
         if np.any(in_margin):
             # collision response --------------------------->>>
-            tri_vo = tri_vo[tris_in]
-            tri_vel1 = np.mean(tri_co_2[tidx[in_margin]], axis=1)
-            tri_vel2 = np.mean(tri_vo[tidx[in_margin]], axis=1)
-            tvel = tri_vel1 - tri_vel2
-            
+            #t_in = tidx[in_margin]
+            #tri_vel1 = np.mean(tri_co[t_in], axis=1)
+            #tvel = np.mean(tri_vo[t_in], axis=1)
+            #tvel = tri_vel1 - tri_vel2
             
             col_idx = cidx[in_margin] 
-            #u, ind = np.unique(col_idx, True)
-            cloth.co[col_idx] -= nor[in_margin] * (d[in_margin])[:, nax]
-            #cloth.co[u] -= nor[in_margin][ind] * (d[in_margin][ind])[:, nax]
-            cloth.vel[col_idx] = tvel
-            #cloth.vel[col_idx] = 0
-            #cloth.vel[u] = tvel[ind]
-            col.vel[:] = col.co                    
-
-            # when iterating springs, we keep putting the collided points back
-            ###cloth.col_idx = col_idx
-            ###cloth.collide_list = cloth.co[col_idx]
-            ###hits = True                    
-    # could use the mean of the original trianlge to determine which face
-    #   to collide with when there are multiples. So closest mean gets used.
+            d_in = d[in_margin]
     
-    revert_in_place(ob, cloth.co)
-    ###if hits:
-        ###cloth.collide_list = cloth.co[col_idx]
+            sign_margin = margin * np.sign(d_in) # which side of the face
+            cloth.co[col_idx] -= ((nor[in_margin] * d_in[:, nax]) - (nor[in_margin] * sign_margin[:, nax]))#) * -np.sign(d[in_margin])[:, nax]
 
+            cloth.vel[col_idx] = 0
+
+    #object.vel[:] = object.co    
+# self collider =============================================
+
+
+# update functions --------------------->>>    
+def tile_and_remove_neighbors(vidx, tidx, c_peat, t_peat):
+
+    tshape = tidx.shape[0]
+    vshape = vidx.shape[0]
+
+    # eliminate tris that contain the point: 
+    # check the speed difference of doing a reshape with ravel at the end
+    co_tidex = c_peat.reshape(vshape, tshape)
+    tri_tidex = tidx[t_peat.reshape(vshape, tshape)]
+    check = tri_tidex == vidx[co_tidex][:,:,nax]
+    cull = ~np.any(check, axis=2)
+
+    # duplicate of each tri for each vert and each vert for each tri
+    c_peat = c_peat[cull.ravel()]
+    t_peat = t_peat[cull.ravel()]
+    
+    return c_peat, t_peat
 
 class ColliderData:
     pass
@@ -1564,14 +1379,22 @@ def create_collider_data(ob):
     col_data[ob.name] = col
     col.ob = ob
 
-    col.co = np.copy(get_proxy_co(ob, None))
-    proxy_in_place(ob, col)
-    col.v_normals = proxy_v_normals(ob)
+    # get proxy
+    proxy = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
+
+    #col.co = np.copy(get_proxy_co(ob, None))
+    col.co = get_proxy_co(ob, None, proxy)
+    col.idxer = np.arange(col.co.shape[0], dtype=np.int32)
+    proxy_in_place(ob, proxy, col)
+    #col.v_normals = proxy_v_normals(ob)
+    col.v_normals = proxy_v_normals(col.ob, proxy)
     col.vel = np.copy(col.co)
-    col.tridex = triangulate(ob)
+    #col.tridex = triangulate(ob)
+    col.tridex = triangulate(col.ob, proxy)
     col.tridexer = np.arange(col.tridex.shape[0], dtype=np.int32)
     # cross_vecs used later by barycentric tri check
-    proxy_v_normals_in_place(ob, col)
+    #proxy_v_normals_in_place(ob, col)
+    proxy_v_normals_in_place(ob, col, True, proxy)
     marginalized = np.array(col.co + col.v_normals * ob.mc.object_collision_outer_margin, dtype=np.float32)
     col.cross_vecs, col.origins, col.normals = get_tri_normals(marginalized[col.tridex])    
 
@@ -1579,10 +1402,14 @@ def create_collider_data(ob):
     col.origins.dtype = np.float32
     #col.normals.dtype = np.float32
 
+    bpy.data.meshes.remove(proxy)
+
     print('INFO: Collider data for', ob.name, 'is created!')
 
     return col
 
+class SelfCollider(object):
+    pass
 
 # Self collision object
 def create_self_collider(ob):
@@ -1643,6 +1470,7 @@ def manage_animation_handler(self, context):
     if ob.mc.frame_update:
         ob.mc.scene_update = False
     
+#<<<<<<< HEAD
         
 def manage_continuous_handler(self, context):    
     ob = self.id_data
@@ -1726,6 +1554,7 @@ def enable_cloth(self, context):
         # New cloth on scene data
         cp = scene.mc.cloth_pointers.add()
         cp.object = ob
+        create_cloth_data(ob)
     else:
         for i, cp in enumerate(scene.mc.cloth_pointers):
             if cp.object == ob:
@@ -1873,7 +1702,6 @@ class ModelingClothPin(bpy.types.Operator):
 
 
 # drag===================================
-# drag===================================
 #[‘DEFAULT’, ‘NONE’, ‘WAIT’, ‘CROSSHAIR’, ‘MOVE_X’, ‘MOVE_Y’, ‘KNIFE’, ‘TEXT’, ‘PAINT_BRUSH’, ‘HAND’, ‘SCROLL_X’, ‘SCROLL_Y’, ‘SCROLL_XY’, ‘EYEDROPPER’]
 
 # dragger===
@@ -1997,7 +1825,6 @@ class ModelingClothDrag(bpy.types.Operator):
 
 
 # drag===================================End
-# drag===================================End
 
 
 
@@ -2116,6 +1943,8 @@ class RemoveVirtualSprings(bpy.types.Operator):
 
 @persistent
 def refresh_cloth_data(scene):
+
+    # Create new data based on available clothes and colliders
     scene = bpy.context.scene
     for cp in scene.mc.cloth_pointers:
         if cp.object:
@@ -2191,11 +2020,12 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
     # spring forces ------------>>>
     spring_force = FloatProperty(name="Modeling Cloth Spring Force", 
         description="Set the spring force", 
-        default=1, precision=4, min=0, max=1.5)#, update=refresh_noise)
+        default=1, precision=4, min=0, max=2.5)#, update=refresh_noise)
 
     push_springs = FloatProperty(name="Modeling Cloth Spring Force", 
         description="Set the spring force", 
-        default=0.2, precision=4, min=0, max=1.5)#, update=refresh_noise)
+        #default=0.2, precision=4, min=0, max=1.5)#, update=refresh_noise)
+        default=1, precision=4, min=0, max=2.5)#, update=refresh_noise)
     # -------------------------->>>
 
     gravity = FloatProperty(name="Modeling Cloth Gravity", 
@@ -2208,7 +2038,7 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
 
     velocity = FloatProperty(name="Velocity", 
         description="Cloth keeps moving", 
-        default=.9, min= -1.1, max=1.1, soft_min= -1, soft_max=1)#, update=refresh_noise_decay)
+        default=.98, min= -200, max=200, soft_min= -1, soft_max=1)#, update=refresh_noise_decay)
 
     # Wind. Note, wind should be measured agains normal and be at zero when normals are at zero. Squared should work
     wind_x = FloatProperty(name="Wind X", 
@@ -2216,7 +2046,7 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
         default=0, min= -1, max=1, soft_min= -10, soft_max=10)#, update=refresh_noise_decay)
 
     wind_y = FloatProperty(name="Wind Y", 
-        description="Because wind is cool", 
+        description="Y? Because wind is cool", 
         default=0, min= -1, max=1, soft_min= -10, soft_max=10)#, update=refresh_noise_decay)
 
     wind_z = FloatProperty(name="Wind Z", 
@@ -2228,21 +2058,21 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
         default=0, min=0, max=1, soft_min= -10, soft_max=10)#, update=refresh_noise_decay)
 
     # self collision ----->>>
-    self_collision = BoolProperty(name="Modeling Cloth Self Collsion", 
-        description="Toggle self collision", 
-        default=False, update=collision_data_update)
-
-    self_collision_force = FloatProperty(name="recovery force", 
-        description="Self colide faces repel", 
-        default=.17, precision=4, min= -1.1, max=1.1, soft_min= 0, soft_max=1)
-
-    self_collision_margin = FloatProperty(name="Margin", 
-        description="Self colide faces margin", 
-        default=.08, precision=4, min= -1, max=1, soft_min= 0, soft_max=1)
-
-    self_collision_cy_size = FloatProperty(name="Cylinder size", 
-        description="Self colide faces cylinder size", 
-        default=1, precision=4, min= 0, max=4, soft_min= 0, soft_max=1.5)
+#    self_collision = BoolProperty(name="Modeling Cloth Self Collsion", 
+#        description="Toggle self collision", 
+#        default=False, update=collision_data_update)
+#
+#    self_collision_force = FloatProperty(name="recovery force", 
+#        description="Self colide faces repel", 
+#        default=.17, precision=4, min= -1.1, max=1.1, soft_min= 0, soft_max=1)
+#
+#    self_collision_margin = FloatProperty(name="Margin", 
+#        description="Self colide faces margin", 
+#        default=.08, precision=4, min= -1, max=1, soft_min= 0, soft_max=1)
+#
+#    self_collision_cy_size = FloatProperty(name="Cylinder size", 
+#        description="Self colide faces cylinder size", 
+#        default=1, precision=4, min= 0, max=4, soft_min= 0, soft_max=1.5)
     # ---------------------->>>
 
     # extras ------->>>
@@ -2259,6 +2089,10 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
     object_collision = BoolProperty(name="Modeling Cloth Self Collsion", 
         description="Detect and collide with this object", 
         default=False, update=collision_object_update)
+
+    #collision_animated = bpy.props.BoolProperty(name="Modeling Cloth Collsion Animated", 
+        #description="Treat collide object as animated. (turn off for speed on static objects)", 
+        #default=True)#, update=collision_object_update)
     
     object_collision_detect = BoolProperty(name="Modeling Cloth Self Collsion", 
         description="Detect collision objects", 
@@ -2271,6 +2105,11 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
     object_collision_inner_margin = FloatProperty(name="Modeling Cloth Inner Margin", 
         description="Collision margin on negative normal side of face", 
         default=0.1, precision=4, min=0, max=100, soft_min=0, soft_max=1000)        
+
+    # more collision stuff ------->>>
+    grid_size = IntProperty(name="Modeling Cloth Grid Size", 
+        description="Max subdivisions for the dynamic broad phase grid", 
+        default=10, min=0, max=1000, soft_min=0, soft_max=1000)
 
     # Not for manual editing ----->>>        
     
@@ -2303,6 +2142,7 @@ def create_properties():
 def remove_properties():            
     '''Drives to the grocery store and buys a sandwich'''
     # No need to remove properties because yolo
+    pass
 
 
 class ModelingClothPanel(bpy.types.Panel):
@@ -2333,13 +2173,31 @@ class ModelingClothPanel(bpy.types.Panel):
                 col.prop(ob.mc ,"enable", text="Modeling Cloth", icon='SURFACE_DATA')               
                 #col = layout.column(align=True)
                 
+                col.prop(ob.mc ,"object_collision", text="Collider", icon="STYLUS_PRESSURE")
+                #if ob.mc.object_collision:
+                    #col.prop(ob.mc ,"collision_animated", text="Animated", icon="POSE_DATA")
+                if ob.mc.object_collision:
+                    col.prop(ob.mc ,"object_collision_outer_margin", text="Outer Margin", icon="FORCE_FORCE")
+                    col.prop(ob.mc ,"object_collision_inner_margin", text="Inner Margin", icon="STICKY_UVS_LOC")
+                
+                col.label("Collide List:")
+                for cp in scene.mc.collider_pointers:
+                    if cp.object:
+                        col.label(cp.object.name)
+
                 if ob.mc.enable:
                     #col.label('Active: ' + ob.name)
+
+                    # object collisions
+                    col = layout.column(align=True)
+                    col.label("Collisions")
+                    col.prop(ob.mc ,"object_collision_detect", text="Object Collisions", icon="PHYSICS")
                     col = layout.column(align=True)
                     col.scale_y = 2.0
 
                     col = layout.column(align=True)
                     col.scale_y = 1.4
+                    col.prop(ob.mc, "grid_size", text="Grid Boxes", icon="MESH_GRID")
                     col.prop(ob.mc, "frame_update", text="Animation Update", icon="TRIA_RIGHT")
                     if ob.mc.frame_update:    
                         col.prop(ob.mc, "auto_reset", text="Frame 1 Reset")
@@ -2384,26 +2242,10 @@ class ModelingClothPanel(bpy.types.Panel):
                         col.operator("object.modeling_cloth_grow", text="Grow Source")
                         col.operator("object.modeling_cloth_shrink", text="Shrink Source")
                         col = layout.column(align=True)
-                        col.prop(ob.mc ,"self_collision", text="Self Collision")#, icon='PLAY')        
-                        col.prop(ob.mc ,"self_collision_force", text="Repel")#, icon='PLAY')        
-                        col.prop(ob.mc ,"self_collision_margin", text="Margin")#, icon='PLAY')        
-                        col.prop(ob.mc ,"self_collision_cy_size", text="Cylinder Size")#, icon='PLAY')        
-
-                # object collisions
-                col = layout.column(align=True)
-                col.label("Collisions")
-                if ob.mc.enable:    
-                    col.prop(ob.mc ,"object_collision_detect", text="Object Collisions", icon="PHYSICS")
-
-                col.prop(ob.mc ,"object_collision", text="Collider", icon="STYLUS_PRESSURE")
-                if ob.mc.object_collision:    
-                    col.prop(ob.mc ,"object_collision_outer_margin", text="Outer Margin", icon="FORCE_FORCE")
-                    col.prop(ob.mc ,"object_collision_inner_margin", text="Inner Margin", icon="STICKY_UVS_LOC")
-                
-                col.label("Collide List:")
-                for cp in scene.mc.collider_pointers:
-                    if cp.object:
-                        col.label(cp.object.name)
+#                        col.prop(ob.mc ,"self_collision", text="Self Collision")#, icon='PLAY')        
+#                        col.prop(ob.mc ,"self_collision_force", text="Repel")#, icon='PLAY')        
+#                        col.prop(ob.mc ,"self_collision_margin", text="Margin")#, icon='PLAY')        
+#                        col.prop(ob.mc ,"self_collision_cy_size", text="Cylinder Size")#, icon='PLAY')        
                     
                 # =============================
                 col = layout.column(align=True)
