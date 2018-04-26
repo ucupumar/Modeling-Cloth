@@ -266,9 +266,8 @@ def initialize(ob): #, key):
 def refresh_dynamic_tension_data(scene):
     data = bpy.context.scene.dynamic_tension_map_dict
     for i, op in enumerate(bpy.context.scene.dten.object_pointers):
-        if op.object:
-            #data[op.object.name] = initialize(op.object)
-            initialize(op.object)
+        if op.ob:
+            initialize(op.ob)
 
 @persistent
 def dynamic_tension_handler(scene):
@@ -278,8 +277,8 @@ def dynamic_tension_handler(scene):
 
     cull_ids = []
     for i, op in enumerate(bpy.context.scene.dten.object_pointers):
-        if op.object and scene.objects.get(op.object.name):
-            update(ob=op.object, max_stretch=stretch, bleed=0.2)   
+        if op.ob and scene.objects.get(op.ob.name):
+            update(ob=op.ob, max_stretch=stretch, bleed=0.2)   
         else:
             cull_ids.append(i)
 
@@ -313,6 +312,17 @@ def update(coords=None, ob=None, max_stretch=1, bleed=0.2):
     data = scene.dynamic_tension_map_dict
     if ob is None:
         ob = bpy.context.object
+
+    if not ob.dten.waiting and ob.mode != 'OBJECT':
+        ob.dten.waiting = True
+
+    if ob.dten.waiting:    
+        if ob.mode == 'OBJECT':
+            initialize(ob)
+            ob.dten.waiting = False
+        else:
+            return
+
     try:
         dtdata = data[ob.name]
     except: 
@@ -376,7 +386,7 @@ def toggle_enable(self, context):
 
         initialize(ob)
         op = scene.dten.object_pointers.add()
-        op.object = ob
+        op.ob = ob
     else:
         # Remove vertex color
         vcol = ob.data.vertex_colors.get(VCOL_NAME)
@@ -385,7 +395,7 @@ def toggle_enable(self, context):
 
         # Remove pointer and data
         for i, op in enumerate(scene.dten.object_pointers):
-            if op.object == ob:
+            if op.ob == ob:
                 if ob.name in data:
                     del(data[ob.name])
                 scene.dten.object_pointers.remove(i)
@@ -431,7 +441,7 @@ def edge_prop_update(self, context):
         scene.dten.map_percentage = True
 
 class DynamicTensionObjectPointer(bpy.types.PropertyGroup):
-    object = PointerProperty(type=bpy.types.Object)
+    ob = PointerProperty(type=bpy.types.Object)
 
 class DynamicTensionObjectProps(bpy.types.PropertyGroup):
 
@@ -447,6 +457,8 @@ class DynamicTensionObjectProps(bpy.types.PropertyGroup):
     mat_index_str = StringProperty(default='')
 
     source = BoolProperty(default=False)
+
+    waiting = BoolProperty(default=False)
 
 class DynamicTensionSceneProps(bpy.types.PropertyGroup):
 
@@ -551,7 +563,7 @@ class DynamicTensionMap(bpy.types.Panel):
 def register():
     create_properties()
 
-    # Register all classes if this file loaded individually
+    # Register all classes if this file loaded separately
     if __name__ in {'__main__', 'DynamicTensionMap'}:
         bpy.utils.register_module(__name__)
 

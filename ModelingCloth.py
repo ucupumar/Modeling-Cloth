@@ -800,7 +800,7 @@ def run_handler(ob, cloth):
     extra_data = scene.modeling_cloth_data_set_extra
     col_data = scene.modeling_cloth_data_set_colliders
 
-    if ob.mode != 'OBJECT':
+    if not ob.mc.waiting and ob.mode != 'OBJECT':
         ob.mc.waiting = True
 
     if ob.mc.waiting:    
