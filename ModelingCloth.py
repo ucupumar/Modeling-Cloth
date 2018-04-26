@@ -661,7 +661,7 @@ class ClothData:
 def create_cloth_data(ob):
     """Creates instance of cloth object with attributes needed for engine"""
     scene = bpy.context.scene
-    data = bpy.context.window_manager.modeling_cloth_data_set
+    data = scene.modeling_cloth_data_set
 
     # Try to get the cloth data first
     try:
@@ -797,8 +797,8 @@ def create_cloth_data(ob):
 def run_handler(ob, cloth):
     T = time.time()
     scene = bpy.context.scene
-    extra_data = bpy.context.window_manager.modeling_cloth_data_set_extra
-    col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
+    extra_data = scene.modeling_cloth_data_set_extra
+    col_data = scene.modeling_cloth_data_set_colliders
 
     if ob.mode != 'OBJECT':
         ob.mc.waiting = True
@@ -1393,7 +1393,7 @@ class SelfColliderData:
 
 
 def get_collider_data(ob):
-    col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
+    col_data = bpy.context.scene.modeling_cloth_data_set_colliders
 
     col = None
     for key, c in col_data.items():
@@ -1406,7 +1406,7 @@ def get_collider_data(ob):
     return col
 
 def create_collider_data(ob):
-    col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
+    col_data = bpy.context.scene.modeling_cloth_data_set_colliders
 
     col = ColliderData()
     col_data[ob.name] = col
@@ -1465,9 +1465,9 @@ def create_self_collider(ob):
 # collide object updater
 def collision_object_update(self, context):
     """Updates the collider object"""    
-    col_data = bpy.context.window_manager.modeling_cloth_data_set_colliders
-    ob = self.id_data
     scene = context.scene
+    col_data = scene.modeling_cloth_data_set_colliders
+    ob = self.id_data
 
     if self.object_collision:
         cp = scene.mc.collider_pointers.add()
@@ -1518,7 +1518,7 @@ def handler_scene(scene):
 
 
 def handler_unified(scene, frame_update=False):
-    data = bpy.context.window_manager.modeling_cloth_data_set
+    data = bpy.context.scene.modeling_cloth_data_set
     cull_ids = []
 
     for i, cp in enumerate(scene.mc.cloth_pointers):
@@ -1554,7 +1554,7 @@ def handler_unified(scene, frame_update=False):
 
 
 def get_cloth_data(ob):
-    data = bpy.context.window_manager.modeling_cloth_data_set
+    data = bpy.context.scene.modeling_cloth_data_set
     try:
         return data[ob.name]
     except:
@@ -1573,8 +1573,8 @@ def get_cloth_data(ob):
 def enable_cloth(self, context):
     ob = self.id_data
     scene = context.scene
-    data = context.window_manager.modeling_cloth_data_set
-    extra_data = context.window_manager.modeling_cloth_data_set_extra
+    data = scene.modeling_cloth_data_set
+    extra_data = scene.modeling_cloth_data_set_extra
     scene.mc.last_object = ob
     
     if ob.mc.enable:
@@ -1750,7 +1750,7 @@ class ModelingClothDrag(bpy.types.Operator):
 
     def invoke(self, context, event):
         scene = context.scene
-        extra_data = context.window_manager.modeling_cloth_data_set_extra
+        extra_data = scene.modeling_cloth_data_set_extra
         scene.mc.drag_alert = True
         #bpy.ops.object.select_all(action='DESELECT')    
 
@@ -1768,7 +1768,7 @@ class ModelingClothDrag(bpy.types.Operator):
     def main_drag(self, context, event):
         # get the context arguments
         scene = context.scene
-        extra_data = context.window_manager.modeling_cloth_data_set_extra
+        extra_data = scene.modeling_cloth_data_set_extra
         region = context.region
         rv3d = context.region_data
         coord = event.mouse_region_x, event.mouse_region_y
@@ -1815,8 +1815,8 @@ class ModelingClothDrag(bpy.types.Operator):
                    
     def modal(self, context, event):
         scene = context.scene
-        #data = context.window_manager.modeling_cloth_data_set
-        extra_data = context.window_manager.modeling_cloth_data_set_extra
+        #data = scene.modeling_cloth_data_set
+        extra_data = scene.modeling_cloth_data_set_extra
         bpy.context.window.cursor_set("HAND")
 
         if event.type in {'MIDDLEMOUSE', 'WHEELUPMOUSE', 'WHEELDOWNMOUSE'}:
@@ -2147,9 +2147,9 @@ def create_properties():
     bpy.types.Object.mc = PointerProperty(type=ModelingClothObjectProps)
 
     # property dictionaries
-    bpy.types.WindowManager.modeling_cloth_data_set = {} 
-    bpy.types.WindowManager.modeling_cloth_data_set_colliders = {}
-    bpy.types.WindowManager.modeling_cloth_data_set_extra = {} 
+    bpy.types.Scene.modeling_cloth_data_set = {} 
+    bpy.types.Scene.modeling_cloth_data_set_colliders = {}
+    bpy.types.Scene.modeling_cloth_data_set_extra = {} 
     
         
 def remove_properties():            
