@@ -617,7 +617,7 @@ def generate_inflate(ob, cloth):
     # reshape for add.at
     shape = cloth.inflate.shape
     
-    cloth.inflate += tri_nor[:, nax] * ob.mc.cloth_inflate# * cloth.tri_mix
+    cloth.inflate += tri_nor[:, nax] * ob.mc.inflate# * cloth.tri_mix
     print(cloth.inflate.shape, "shape of cloth.inflate")
     print(cloth.mix.shape)
     

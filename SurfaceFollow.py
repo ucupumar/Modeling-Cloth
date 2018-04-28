@@ -5,9 +5,9 @@
 
 bl_info = {
     "name": "Surface Follow",
-    "author": "Rich Colburn, email: the3dadvantage@gmail.com",
+    "author": "Rich Colburn (the3dadvantage@gmail.com), Yusuf Umar (@ucupumar)",
     "version": (1, 0),
-    "blender": (2, 78, 0),
+    "blender": (2, 79, 0),
     "location": "View3D > Extended Tools > Surface Follow",
     "description": "Doforms an object as the surface of another object changes",
     "warning": "Do not use if you are pregnant or have ever met someone who was pregnant",
@@ -17,6 +17,8 @@ bl_info = {
 import bpy
 import numpy as np
 np.seterr(all='ignore')
+from bpy.props import *
+from bpy.app.handlers import persistent
 import bmesh
 import time
 
@@ -108,6 +110,8 @@ def get_coords(ob='empty', proxy=False):
     if proxy:
         mesh = proxy.to_mesh(bpy.context.scene, True, 'PREVIEW')
         verts = mesh.vertices
+    elif 'surface follow' in ob.data.shape_keys.key_blocks:
+        verts = ob.data.shape_keys.key_blocks['surface follow'].data
     else:
         verts = ob.data.vertices
     v_count = len(verts)
@@ -338,9 +342,55 @@ def nearest_triangles_oct(surface_coords, follower_coords, tris):  # octree
 
     return fill_me
 
+def create_follower_data(ob):
+    scene = bpy.context.scene
+    di = scene.surface_follow_follower_data_set            
+
+    # Get surface object
+    surface = [fp.surface for fp in scene.sfol.follower_pointers if fp.ob == ob]
+    if not surface: 
+        return None
+    else:
+        surface = surface[0]
+
+    if ob.data.shape_keys == None:
+        ob.shape_key_add('Basis')    
+    if 'surface follow' not in ob.data.shape_keys.key_blocks:
+        ob.shape_key_add('surface follow')        
+        ob.data.shape_keys.key_blocks['surface follow'].value=1
+    a = transform_matrix(get_coords(surface, surface), surface)
+    b = transform_matrix(get_coords(ob), ob)    
+    tris = triangulate(surface, proxy=True)
+    #reg = nearest_triangles(a, b, tris)
+    oct = nearest_triangles_oct(a, b, tris)
+    tri_indexer = tris[oct]
+    tri_coords = a[tri_indexer]
+    hits, length = project_points(b, tri_coords)
+    scalars = barycentric_generate(hits, a[tri_indexer])
+
+    # Create dictionary items:
+    di[ob.name] = {}
+    di[ob.name]['tri_indexer'] = tri_indexer
+    di[ob.name]['scalars'] = scalars
+    di[ob.name]['length'] = length
+    di[ob.name]['surface_coords'] = a
+
+    print('INFO: Surface follow data for', ob.name, 'is created!')
+
+    return di[ob.name]
+
+def get_follower_data(ob):
+    di = bpy.context.scene.surface_follow_follower_data_set            
+
+    try:
+        return di[ob.name]
+    except:
+        return create_follower_data(ob)
+
 def multi_bind():
     x = 5
     obj = bpy.context.object 
+    scene = bpy.context.scene
     if obj == None:
         return -1
     list = [i for i in bpy.context.selected_objects if i.type == 'MESH']
@@ -348,121 +398,128 @@ def multi_bind():
     # sort active object and cull objects that are not meshes:
     if count < 2:
         return -1
-    di = bpy.context.scene.surface_follow_data_set            
-    di['surfaces'][obj.name] = obj
-    di_followers = di['objects']
     for i in bpy.context.selected_objects:
         if (i.type == 'MESH') & (i != obj): 
-            if i.data.shape_keys == None:
-                i.shape_key_add('Basis')    
-            if 'surface follow' not in i.data.shape_keys.key_blocks:
-                i.shape_key_add('surface follow')        
-                i.data.shape_keys.key_blocks['surface follow'].value=1
-            a = transform_matrix(get_coords(obj, obj), obj)
-            b = transform_matrix(get_coords(i), i)    
-            tris = triangulate(obj, proxy=True)
-            #reg = nearest_triangles(a, b, tris)
-            oct = nearest_triangles_oct(a, b, tris)
-            tri_indexer = tris[oct]
-            tri_coords = a[tri_indexer]
-            hits, length = project_points(b, tri_coords)
-            scalars = barycentric_generate(hits, a[tri_indexer])
-            
-            # Create dictionary items:
-            di_followers[i.name] = {}
-            di_followers[i.name]['surface'] = obj
-            di_followers[i.name]['tri_indexer'] = tri_indexer
-            di_followers[i.name]['scalars'] = scalars
-            di_followers[i.name]['length'] = length
-            di_followers[i.name]['surface_coords'] = a
+
+            fp = scene.sfol.follower_pointers.add()
+            fp.ob = i
+            fp.surface = obj
+
+            create_follower_data(i)
 
 def multi_update():
     obs = bpy.data.objects
-    di = bpy.context.scene.surface_follow_data_set
+    scene = bpy.context.scene
+    di = scene.surface_follow_follower_data_set            
     s_coords = {}
     
     # if an object no longer has valid data it goes into a list to be deleted when done iterating 
-    cull_list = [] 
+    cull_list = []
     
-    for i in di['surfaces']:
-        try:
-            s_coords[i] = transform_matrix(get_coords(obs[i], obs[i]), obs[i])
-        except (KeyError, RuntimeError):
+    for i, fp in enumerate(scene.sfol.follower_pointers):
+        child = fp.ob
+        surface = fp.surface
+        if not child or not surface or not scene.objects.get(child.name) or not scene.objects.get(surface.name):
             cull_list.append(i)
+        else:
+            if surface.name not in s_coords:
+                s_coords[surface.name] = transform_matrix(get_coords(surface, surface), surface)
 
-    #for i in di['objects']:
-    for i, value in di['objects'].items():
-        try:            
-            child = obs[i]
-            coords = s_coords[value['surface'].name]
-            project = barycentric_remap_multi(coords[value['tri_indexer']], value['scalars'][0], value['scalars'][1], value['scalars'][2], value['scalars'][3], value['scalars'][4], value['length'])
+            fol_data = get_follower_data(child)
+            coords = s_coords[fp.surface.name]
+            project = barycentric_remap_multi(coords[fol_data['tri_indexer']], fol_data['scalars'][0], fol_data['scalars'][1], fol_data['scalars'][2], fol_data['scalars'][3], fol_data['scalars'][4], fol_data['length'])
             set_key_coords(transform_matrix(project, child, back=True), 'surface follow', child)
-        except (KeyError, RuntimeError):
-            cull_list.append(i)
 
-    for i in cull_list:
-        del i
+    for i in reversed(cull_list):
+        fp = scene.sfol.follower_pointers[i]
+        if fp.ob:
+            if fp.ob.name in di:
+                del(di[fp.ob.name])
+        scene.sfol.follower_pointers.remove(i)
 
-def test_thingy():
-    print('doing something every frame (like bathing or possibly eating a mountain goat)')
+@persistent
+def handler_frame(scene):
+    if scene.sfol.frame_update:
+        multi_update()
 
-def run_handler(scene, override=False):
-    multi_update()
-    #test_thingy()
-        
-def remove_handler(type):
-    '''Deletes handler from the scene'''
-    if type == 'scene':
-        if run_handler in bpy.app.handlers.scene_update_pre:
-            bpy.app.handlers.scene_update_pre.remove(run_handler)
-    if type == 'frame':
-        if run_handler in bpy.app.handlers.frame_change_post:
-            bpy.app.handlers.frame_change_post.remove(run_handler)
+@persistent
+def handler_scene(scene):
+    if scene.sfol.scene_update:
+        multi_update()
 
-def add_handler(type):
-    '''adds handler from the scene'''
-    if type == 'scene':        
-        bpy.app.handlers.scene_update_pre.append(run_handler)
-    if type == 'frame':
-        bpy.app.handlers.frame_change_post.append(run_handler)
-    
+@persistent
+def refresh_surface_follow_data(scene):
+    scene = bpy.context.scene
+    for fp in scene.sfol.follower_pointers:
+        create_follower_data(fp.ob)
+
 # run on prop callback
-def toggle_display(self, context):
-    if bpy.context.scene.surface_follow_on:
-        add_handler('scene')
-        remove_handler('frame')
-        bpy.context.scene['surface_follow_frame'] = False
+def toggle_scene_update(self, context):
+    scene = self.id_data
+    if scene.sfol.scene_update:
+        scene.sfol.frame_update = False
         
-    elif bpy.context.scene.surface_follow_frame:
-        add_handler('frame')
-        remove_handler('scene')    
-        bpy.context.scene['surface_follow_on'] = False
-    else:
-        remove_handler('scene')
-        remove_handler('frame')
+def toggle_frame_update(self, context):
+    scene = self.id_data
+    if scene.sfol.frame_update:
+        scene.sfol.scene_update = False
 
 # Properties-----------------------------------:
+class SurfaceFollowFollowerPointer(bpy.types.PropertyGroup):
+    ob = PointerProperty(type=bpy.types.Object)
+    surface = PointerProperty(type=bpy.types.Object)
+
+class SurfaceFollowSceneProps(bpy.types.PropertyGroup):
+    scene_update = BoolProperty(name="Scene Update", 
+        description="For toggling the dynamic tension map", 
+        default=False, update=toggle_scene_update)
+
+    frame_update = BoolProperty(name="Frame Update", 
+        description="For toggling the dynamic tension map", 
+        default=False, update=toggle_frame_update)
+
+    follower_pointers = CollectionProperty(type=SurfaceFollowFollowerPointer)
+
 def create_properties():            
 
-    bpy.types.Scene.surface_follow_on = bpy.props.BoolProperty(name="Scene Update", 
-        description="For toggling the dynamic tension map", 
-        default=False, update=toggle_display)
+    bpy.types.Scene.sfol = PointerProperty(type=SurfaceFollowSceneProps)
 
-    bpy.types.Scene.surface_follow_frame = bpy.props.BoolProperty(name="Frame Update", 
-        description="For toggling the dynamic tension map", 
-        default=False, update=toggle_display)
-
-    bpy.types.Scene.surface_follow_data_set = {} 
-    bpy.types.Scene.surface_follow_data_set['surfaces'] = {}
-    bpy.types.Scene.surface_follow_data_set['objects'] = {}
+    bpy.types.Scene.surface_follow_follower_data_set = {}
     
 def remove_properties():            
     '''Walks down the street and gets me a coffee'''
-    del(bpy.types.Scene.surface_follow_on)
-    del(bpy.types.Scene.surface_follow_frame)
-    del(bpy.types.Scene.surface_follow_data_set)
+    # No need to delete anything because yolo
+    pass
             
 # Create Classes-------------------------------:
+
+class UnbindFromSurface(bpy.types.Operator):
+    '''Unbind From Surface'''
+    bl_idname = "scene.unbind_from_surface"
+    bl_label = "unbind from surface"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        di = scene.surface_follow_follower_data_set            
+        cull_ids = []
+        for ob in context.selected_objects:
+            cull_ids.extend([i for i, fp in enumerate(scene.sfol.follower_pointers) if fp.ob == ob])
+
+        if not cull_ids:
+            self.report({'INFO'}, 'No bind object found!')
+            return {'CANCELLED'}
+
+        cull_ids = list(set(cull_ids))
+        cull_ids.sort()
+
+        for i in reversed(cull_ids):
+            fp = scene.sfol.follower_pointers[i]
+            if fp.ob.name in di:
+                del(di[fp.ob.name])
+            scene.sfol.follower_pointers.remove(i)
+            
+        return {'FINISHED'}
 
 class BindToSurface(bpy.types.Operator):
     '''Bind To Surface'''
@@ -475,22 +532,14 @@ class BindToSurface(bpy.types.Operator):
             self.report({'ERROR'}, 'Select at least two objects')
         return {'FINISHED'}
 
-class ToggleSurfaceFollow(bpy.types.Operator):
-    '''Toggle Surface Follow Update'''
-    bl_idname = "scene.toggle_surface_follow"
-    bl_label = "surface follow updater"
-    bl_options = {'REGISTER', 'UNDO'}
-    def execute(self, context):
-        toggle_display()
-        return {'FINISHED'}
-
 class UpdateOnce(bpy.types.Operator):
     '''Surface Update'''
     bl_idname = "scene.surface_update_once"
     bl_label = "update surface one time"
     bl_options = {'REGISTER', 'UNDO'}
     def execute(self, context):
-        run_handler(None, True)
+        #run_handler(None, True)
+        multi_update()
         return {'FINISHED'}
 
 class SurfaceFollowPanel(bpy.types.Panel):
@@ -507,25 +556,41 @@ class SurfaceFollowPanel(bpy.types.Panel):
         col = layout.column(align=True)
         col.label(text="Surface Follow")
         col.operator("scene.bind_to_surface", text="Bind to Surface")
+        col.operator("scene.unbind_from_surface", text="Unbind")
+        col = layout.column(align=True)
         col.operator("scene.surface_update_once", text="Update Once", icon='RECOVER_AUTO')        
-        if not bpy.context.scene.surface_follow_frame:    
-            col.prop(bpy.context.scene ,"surface_follow_on", text="Scene Update", icon='SCENE_DATA')               
-        if not bpy.context.scene.surface_follow_on:            
-            col.prop(bpy.context.scene ,"surface_follow_frame", text="Frame Update", icon='PLAY')               
+        if not bpy.context.scene.sfol.frame_update:    
+            col.prop(bpy.context.scene.sfol ,"scene_update", text="Scene Update", icon='SCENE_DATA')               
+        if not bpy.context.scene.sfol.scene_update:            
+            col.prop(bpy.context.scene.sfol ,"frame_update", text="Frame Update", icon='PLAY')               
 
 # Register Clases -------------->>>
 
 def register():
     create_properties()
 
-    # Register all classes if this file loaded individually
+    # Register all classes if this file loaded separately
     if __name__ in {'__main__', 'SurfaceFollow'}:
         bpy.utils.register_module(__name__)
 
+    # Main handlers
+    bpy.app.handlers.frame_change_post.append(handler_frame)
+    bpy.app.handlers.scene_update_post.append(handler_scene)
+
+    # Add load handlers
+    bpy.app.handlers.load_post.append(refresh_surface_follow_data)
+
 def unregister():
+    # Remove load handlers
+    bpy.app.handlers.load_post.remove(refresh_surface_follow_data)
+
+    # Remove main handlers
+    bpy.app.handlers.frame_change_post.remove(handler_frame)
+    bpy.app.handlers.scene_update_post.remove(handler_scene)
+
     remove_properties()
 
-    # Unregister all classes if this file loaded individually
+    # Unregister all classes if this file loaded separately
     if __name__ in {'__main__', 'SurfaceFollow'}:
         bpy.utils.unregister_module(__name__)
 

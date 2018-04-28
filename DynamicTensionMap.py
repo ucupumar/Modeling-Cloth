@@ -7,7 +7,7 @@ from bpy.app.handlers import persistent
 
 bl_info = {
     "name": "Dynamic Tension Map",
-    "author": "Rich Colburn (email: the3dadvantage@gmail.com), Yusuf Umar (@ucupumar)",
+    "author": "Rich Colburn (the3dadvantage@gmail.com), Yusuf Umar (@ucupumar)",
     "version": (1, 0),
     "blender": (2, 79, 0),
     "location": "View3D > Extended Tools > Tension Map",
@@ -582,7 +582,7 @@ def unregister():
 
     remove_properties()
 
-    # Unregister all classes if this file loaded individually
+    # Unregister all classes if this file loaded separately
     if __name__ in {'__main__', 'DynamicTensionMap'}:
         bpy.utils.unregister_module(__name__)
 
