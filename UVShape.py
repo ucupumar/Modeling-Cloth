@@ -485,14 +485,14 @@ class Print3DTools(bpy.types.Panel):
 def register():
     create_properties()
 
-    # Register all classes if this file loaded individually
+    # Register all classes if this file loaded separately
     if __name__ in {'__main__', 'UVShape'}:
         bpy.utils.register_module(__name__)
 
 def unregister():
     remove_properties()
 
-    # Unregister all classes if this file loaded individually
+    # Unregister all classes if this file loaded separately
     if __name__ in {'__main__', 'UVShape'}:
         bpy.utils.unregister_module(__name__)
     
