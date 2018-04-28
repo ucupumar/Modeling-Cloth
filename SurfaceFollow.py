@@ -22,6 +22,8 @@ from bpy.app.handlers import persistent
 import bmesh
 import time
 
+AUTO_UPDATE_WHEN_ERROR_HAPPENS = True
+
 def rotate_around_axis(coords, Q, origin='empty'):
     '''Uses standard quaternion to rotate a vector. Q requires
     a 4-dimensional vector. coords is the 3d location of the point.
@@ -346,12 +348,12 @@ def create_follower_data(ob):
     scene = bpy.context.scene
     di = scene.surface_follow_follower_data_set            
 
-    # Get surface object
-    surface = [fp.surface for fp in scene.sfol.follower_pointers if fp.ob == ob]
-    if not surface: 
+    # Get follower pointer
+    fp = [fp for fp in scene.sfol.follower_pointers if fp.ob == ob]
+    if not fp or not fp[0].surface: 
         return None
-    else:
-        surface = surface[0]
+    fp = fp[0]
+    surface = fp.surface
 
     if ob.data.shape_keys == None:
         ob.shape_key_add('Basis')    
@@ -407,6 +409,9 @@ def multi_bind():
 
             create_follower_data(i)
 
+def barycentric_remap(coords, fol_data):
+    return barycentric_remap_multi(coords[fol_data['tri_indexer']], fol_data['scalars'][0], fol_data['scalars'][1], fol_data['scalars'][2], fol_data['scalars'][3], fol_data['scalars'][4], fol_data['length'])
+
 def multi_update():
     obs = bpy.data.objects
     scene = bpy.context.scene
@@ -427,7 +432,10 @@ def multi_update():
 
             fol_data = get_follower_data(child)
             coords = s_coords[fp.surface.name]
-            project = barycentric_remap_multi(coords[fol_data['tri_indexer']], fol_data['scalars'][0], fol_data['scalars'][1], fol_data['scalars'][2], fol_data['scalars'][3], fol_data['scalars'][4], fol_data['length'])
+            # Recreate data if surface vertex count have diffrent value than before
+            if fol_data['surface_coords'].shape[0] != coords.shape[0]:
+                fol_data = create_follower_data(child)
+            project = barycentric_remap(coords, fol_data)
             set_key_coords(transform_matrix(project, child, back=True), 'surface follow', child)
 
     for i in reversed(cull_list):

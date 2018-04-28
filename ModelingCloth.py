@@ -66,7 +66,7 @@ from bpy.app.handlers import persistent
 from mathutils import *
 import time, sys
 
-AUTO_UPDATE_WHEN_ERROR_HAPPENS = False
+AUTO_UPDATE_WHEN_ERROR_HAPPENS = True
 
 #enable_numexpr = True
 enable_numexpr = False
