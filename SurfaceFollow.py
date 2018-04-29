@@ -22,8 +22,6 @@ from bpy.app.handlers import persistent
 import bmesh
 import time
 
-AUTO_UPDATE_WHEN_ERROR_HAPPENS = True
-
 def rotate_around_axis(coords, Q, origin='empty'):
     '''Uses standard quaternion to rotate a vector. Q requires
     a 4-dimensional vector. coords is the 3d location of the point.
