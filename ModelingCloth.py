@@ -59,8 +59,6 @@ from bpy.app.handlers import persistent
 from mathutils import *
 import time, sys
 
-AUTO_UPDATE_WHEN_ERROR_HAPPENS = True
-
 #enable_numexpr = True
 enable_numexpr = False
 if enable_numexpr:
@@ -1006,29 +1004,9 @@ def run_handler(ob, cloth):
                     continue
 
                 if cp.ob == ob:    
-                    if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
-                        self_collide(ob)
-                    else:
-                        try:
-                           self_collide(ob)
-                            #cloth.co[cloth.pindexer] = cloth.vel_start[cloth.pindexer]
-                        except:
-                            print(sys.exc_info())
-                            print('ERROR: Collider error! Updating to new collider data!')
-                            col = create_collider_data(ob)
-                            self_collide(ob)
-                            #cloth.co[cloth.pindexer] = cloth.vel_start[cloth.pindexer]
+                    self_collide(ob)
                 else:    
-                    if not AUTO_UPDATE_WHEN_ERROR_HAPPENS:
-                        object_collide(ob, cp.ob)
-                    else:
-                        try:
-                           object_collide(ob, cp.ob)
-                        except:
-                            print(sys.exc_info())
-                            print('ERROR: Collider error! Updating to new collider data!')
-                            col = create_collider_data(cp.ob)
-                            object_collide(ob, cp.ob)
+                    object_collide(ob, cp.ob)
 
             # Remove collider missing object from pointer list
             for i in reversed(cull_ids):
@@ -1287,6 +1265,9 @@ def object_collide(cloth_ob, col_ob):
     col = get_collider_data(col_ob)
 
     proxy = col_ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
+    # Recreate collider data if number of vertices is changing
+    if col.co.shape[0] != len(proxy.vertices):
+        col = create_collider_data(col_ob)
     proxy_in_place(col, proxy)
     apply_in_place(cloth_ob, cloth.co, cloth)
     
@@ -1368,7 +1349,7 @@ def object_collide(cloth_ob, col_ob):
 # self collider =============================================
 def self_collide(ob):
     cloth = get_cloth_data(ob)
-    col = get_collider_data(ob)
+    #col = get_collider_data(ob)
 
     margin = ob.mc.object_collision_outer_margin
     fudge = margin
@@ -1420,7 +1401,7 @@ def self_collide(ob):
             #cloth.vel[col_idx] = 0
             cloth.vel[col_idx] = t_vel
 
-    #object.vel[:] = object.co    
+    #col.vel[:] = col.co    
 # self collider =============================================
 
 
@@ -1475,7 +1456,6 @@ def create_collider_data(ob):
     # get proxy
     proxy = ob.to_mesh(bpy.context.scene, True, 'PREVIEW')
 
-    #col.co = np.copy(get_proxy_co(ob, None))
     col.co = get_proxy_co(ob, None, proxy)
     col.idxer = np.arange(col.co.shape[0], dtype=np.int32)
     proxy_in_place(col, proxy)
