@@ -228,12 +228,12 @@ def revert_rotation(ob, co):
 def get_last_object():
     """Finds cloth objects for keeping settings active
     while selecting other objects like pins"""
-    cloths = [i for i in bpy.data.objects if i.mc.enable] # so we can select an empty and keep the settings menu up
-    if bpy.context.object.mc.enable:
+    cloths = [i for i in bpy.data.objects if i.mclo.enable] # so we can select an empty and keep the settings menu up
+    if bpy.context.object.mclo.enable:
         return cloths, bpy.context.object
     
     if len(cloths) > 0:
-        ob = bpy.context.scene.mc.last_object
+        ob = bpy.context.scene.mclo.last_object
         return cloths, ob
     return None, None
 
@@ -430,7 +430,7 @@ def add_remove_virtual_springs(remove=False):
     sel = np.array([v.select for v in obm.verts])    
     selected = idxer[sel]
 
-    virtual_springs = np.array([[vs.vertex_id_1, vs.vertex_id_2] for vs in ob.mc.virtual_springs])
+    virtual_springs = np.array([[vs.vertex_id_1, vs.vertex_id_2] for vs in ob.mclo.virtual_springs])
     if virtual_springs.shape[0] == 0:
         virtual_springs.shape = (0, 2)
 
@@ -442,7 +442,7 @@ def add_remove_virtual_springs(remove=False):
         deleter = np.arange(ls.shape[0], dtype=np.int32)[in_sel]
 
         for i in reversed(deleter):
-            ob.mc.virtual_springs.remove(i)
+            ob.mclo.virtual_springs.remove(i)
 
         return
 
@@ -462,7 +462,7 @@ def add_remove_virtual_springs(remove=False):
         idx_set = not_in[not_in != i]
         for sv in idx_set:
             #springs.append([i, sv])
-            new_vs = ob.mc.virtual_springs.add()
+            new_vs = ob.mclo.virtual_springs.add()
             new_vs.vertex_id_1 = i
             new_vs.vertex_id_2 = sv
 
@@ -522,7 +522,7 @@ def scale_source(multiplier):
     """grow or shrink the source shape"""
     ob = get_last_object()[1]
     if ob is not None:
-        if ob.mc.enable:
+        if ob.mclo.enable:
             count = len(ob.data.vertices)
             co = np.zeros(count*3, dtype=np.float32)
             ob.data.shape_keys.key_blocks['modeling cloth source key'].data.foreach_get('co', co)
@@ -541,10 +541,10 @@ def reset_shapes(ob=None):
     """Sets the modeling cloth key to match the source key.
     Will regenerate shape keys if they are missing"""
     if ob is None:    
-        if bpy.context.object.mc.enable:
+        if bpy.context.object.mclo.enable:
             ob = bpy.context.object
         else:    
-            ob = bpy.context.scene.mc.last_object
+            ob = bpy.context.scene.mclo.last_object
 
     if ob.data.shape_keys == None:
         ob.shape_key_add('Basis')    
@@ -588,7 +588,7 @@ def get_spring_mix(ob, eidx):
 
 def collision_data_update(self, context):
     ob = self.id_data
-    if ob.mc.self_collision:    
+    if ob.mclo.self_collision:    
         create_cloth_data(ob)
 
 
@@ -599,7 +599,7 @@ def refresh_noise(self, context):
         zeros = np.zeros(cloth.count, dtype=np.float32)
         random = np.random.random(cloth.count)
         zeros[:] = random
-        cloth.noise = ((zeros + -0.5) * ob.mc.noise * 0.1)[:, nax]
+        cloth.noise = ((zeros + -0.5) * ob.mclo.noise * 0.1)[:, nax]
 
 
 def generate_wind(wind_vec, ob, cloth):
@@ -608,7 +608,7 @@ def generate_wind(wind_vec, ob, cloth):
     tri_nor = cloth.normals # non-unit calculated by tri_normals_in_place() per each triangle
     w_vec = revert_rotation(ob, wind_vec)
 
-    turb = ob.mc.turbulence    
+    turb = ob.mclo.turbulence    
     if turb != 0: 
         w_vec += np.random.random(3).astype(np.float32) * turb * np.mean(w_vec) * 4
 
@@ -629,13 +629,13 @@ def generate_wind(wind_vec, ob, cloth):
 def generate_inflate(ob, cloth):
     """Blow it up baby!"""    
     
-    tri_nor = cloth.normals #* ob.mc.inflate # non-unit calculated by tri_normals_in_place() per each triangle
+    tri_nor = cloth.normals #* ob.mclo.inflate # non-unit calculated by tri_normals_in_place() per each triangle
     #tri_nor /= np.einsum("ij, ij->i", tri_nor, tri_nor)[:, nax]
     
     # reshape for add.at
     shape = cloth.inflate.shape
     
-    cloth.inflate += tri_nor[:, nax] * ob.mc.inflate# * cloth.tri_mix
+    cloth.inflate += tri_nor[:, nax] * ob.mclo.inflate# * cloth.tri_mix
     print(cloth.inflate.shape, "shape of cloth.inflate")
     print(cloth.mix.shape)
     
@@ -674,7 +674,7 @@ def check_and_get_pins_and_hooks(ob):
     pins = []
     hooks = []
     cull_ids = []
-    for i, pin in enumerate(ob.mc.pins):
+    for i, pin in enumerate(ob.mclo.pins):
         # Check if hook object still exists
         if not pin.hook or (pin.hook and not scene.objects.get(pin.hook.name)):
             cull_ids.append(i)
@@ -685,10 +685,10 @@ def check_and_get_pins_and_hooks(ob):
 
     # Delete missing hooks pointers 
     for i in reversed(cull_ids):
-        pin = ob.mc.pins[i]
+        pin = ob.mclo.pins[i]
         if pin.hook:
             bpy.data.objects.remove(pin.hook)
-        ob.mc.pins.remove(i)
+        ob.mclo.pins.remove(i)
 
     return pins, hooks
 
@@ -763,8 +763,8 @@ def create_cloth_data(ob):
         cloth.eidx = uni_edges[0]
     #cloth.eidx = uni_edges[0][0]
 
-    if len(ob.mc.virtual_springs) > 0:
-        virtual_springs = np.array([[vs.vertex_id_1, vs.vertex_id_2] for vs in ob.mc.virtual_springs])
+    if len(ob.mclo.virtual_springs) > 0:
+        virtual_springs = np.array([[vs.vertex_id_1, vs.vertex_id_2] for vs in ob.mclo.virtual_springs])
         cloth.eidx = np.append(cloth.eidx, virtual_springs, axis=0)
     cloth.eidx_tiler = cloth.eidx.T.ravel()    
 
@@ -803,7 +803,7 @@ def create_cloth_data(ob):
     noise_zeros = np.zeros(cloth.count, dtype=np.float32)
     random = np.random.random(cloth.count).astype(np.float32)
     noise_zeros[:] = random
-    cloth.noise = ((noise_zeros + -0.5) * ob.mc.noise * 0.1)[:, nax]
+    cloth.noise = ((noise_zeros + -0.5) * ob.mclo.noise * 0.1)[:, nax]
     
     #cloth.waiting = False
     #cloth.clicked = False # for the grab tool
@@ -840,15 +840,15 @@ def run_handler(ob, cloth):
     extra_data = scene.modeling_cloth_data_set_extra
     col_data = scene.modeling_cloth_data_set_colliders
 
-    if not ob.mc.waiting and ob.mode != 'OBJECT':
-        ob.mc.waiting = True
+    if not ob.mclo.waiting and ob.mode != 'OBJECT':
+        ob.mclo.waiting = True
 
-    if ob.mc.waiting:    
+    if ob.mclo.waiting:    
         if ob.mode == 'OBJECT':
             create_cloth_data(ob)
-            ob.mc.waiting = False
+            ob.mclo.waiting = False
 
-    if not ob.mc.waiting:
+    if not ob.mclo.waiting:
         eidx = cloth.eidx # world's most important variable
         ob.data.shape_keys.key_blocks['modeling cloth source key'].data.foreach_get('co', cloth.sco.ravel())
         
@@ -860,23 +860,23 @@ def run_handler(ob, cloth):
 
         co[cloth.pindexer] += cloth.noise[cloth.pindexer]
         #co += cloth.noise
-        cloth.noise *= ob.mc.noise_decay
+        cloth.noise *= ob.mclo.noise_decay
 
         # mix in vel before collisions and sewing
         co[cloth.pindexer] += cloth.vel[cloth.pindexer]
         cloth.vel_start[:] = co
 
 
-        force = ob.mc.spring_force
+        force = ob.mclo.spring_force
         mix = cloth.mix * force
 
         pin_list = []
-        if len(ob.mc.pins) > 0:
+        if len(ob.mclo.pins) > 0:
             pin_list, hook_list = check_and_get_pins_and_hooks(ob)
             hook_co = np.array([ob.matrix_world.inverted() * hook.matrix_world.to_translation() 
                 for hook in hook_list])
 
-        for x in range(ob.mc.iterations):    
+        for x in range(ob.mclo.iterations):    
             # add pull
             vecs = co[eidx[:, 1]] - co[eidx[:, 0]]
             dots = np.einsum('ij,ij->i', vecs, vecs)
@@ -885,7 +885,7 @@ def run_handler(ob, cloth):
             move = vecs - swap
 
             # pull separate test--->>>
-            push = ob.mc.push_springs
+            push = ob.mclo.push_springs
             if push == 0:
                 move[div > 1] = 0
             else:
@@ -900,15 +900,13 @@ def run_handler(ob, cloth):
                 cloth.co[pin_list] = hook_co
             
             # grab inside spring iterations
-            if ob.mc.clicked: # for the grab tool
+            if ob.mclo.clicked: # for the grab tool
                 cloth.co[extra_data['vidx']] = np.array(extra_data['stored_vidx']) + np.array(+ extra_data['move'])   
 
         spring_dif = cloth.co - cloth.vel_start
-        grav = ob.mc.gravity * (.01 / ob.mc.iterations)
+        grav = ob.mclo.gravity * (.01 / ob.mclo.iterations)
         cloth.vel += revert_rotation(ob, np.array([0, 0, grav]))
 
-        # refresh normals for inflate and wind
-        #get_v_normals(ob, cloth.v_normals)
         # refresh normals for inflate wind and self collisions
         cloth.tri_co = cloth.co[cloth.tridex]
         tri_normals_in_place(cloth, cloth.tri_co) # unit normals
@@ -928,16 +926,16 @@ def run_handler(ob, cloth):
 
 
         # wind:
-        x = ob.mc.wind_x
-        y = ob.mc.wind_y
-        z = ob.mc.wind_z
+        x = ob.mclo.wind_x
+        y = ob.mclo.wind_y
+        z = ob.mclo.wind_z
         wind_vec = np.array([x,y,z])
         check_wind = wind_vec != 0
         if np.any(check_wind):
             generate_wind(wind_vec, ob, cloth)            
 
         # inflate
-        inflate = ob.mc.inflate
+        inflate = ob.mclo.inflate
         if inflate != 0:
             generate_inflate(ob, cloth)
             #cloth.v_normals *= inflate
@@ -960,15 +958,15 @@ def run_handler(ob, cloth):
         # have to converto to a range between 0 and 1
         squared_move_dist = np.einsum("ij, ij->i", cloth.vel, cloth.vel)
         squared_move_dist += 1
-        cloth.vel *= (1 / (squared_move_dist / ob.mc.velocity))[:, nax]
+        cloth.vel *= (1 / (squared_move_dist / ob.mclo.velocity))[:, nax]
 
         
-        if ob.mc.sew != 0:
+        if ob.mclo.sew != 0:
             if len(cloth.sew_edges) > 0:
                 sew_edges = cloth.sew_edges
                 rs = co[sew_edges[:,1]]
                 ls = co[sew_edges[:,0]]
-                sew_vecs = (rs - ls) * 0.5 * ob.mc.sew
+                sew_vecs = (rs - ls) * 0.5 * ob.mclo.sew
                 co[sew_edges[:,1]] -= sew_vecs
                 co[sew_edges[:,0]] += sew_vecs
 
@@ -978,14 +976,14 @@ def run_handler(ob, cloth):
                         cosg = co[sg]
                         meanie = np.mean(cosg, axis=0)
                         sg_vecs = meanie - cosg
-                        co[sg] += sg_vecs * ob.mc.sew
+                        co[sg] += sg_vecs * ob.mclo.sew
 
         # !!!!!  need to try adding in the velocity before doing the collision stuff
         # !!!!! so vel would be added here after wind and inflate but before collision
 
         
         # floor ---
-        if ob.mc.floor:    
+        if ob.mclo.floor:    
             floored = cloth.co[:,2] < 0        
             cloth.vel[:,2][floored] *= -1
             cloth.vel[floored] *= .1
@@ -995,9 +993,9 @@ def run_handler(ob, cloth):
 
         # objects ---
         #T = time.time()
-        if ob.mc.object_collision_detect:
+        if ob.mclo.object_collision_detect:
             cull_ids = []
-            for i, cp in enumerate(scene.mc.collider_pointers):
+            for i, cp in enumerate(scene.mclo.collider_pointers):
                 # Check if object is still exists
                 if not cp.ob or (cp.ob and not scene.objects.get(cp.ob.name)):
                     cull_ids.append(i)
@@ -1010,11 +1008,11 @@ def run_handler(ob, cloth):
 
             # Remove collider missing object from pointer list
             for i in reversed(cull_ids):
-                o = scene.mc.collider_pointers[i].ob
+                o = scene.mclo.collider_pointers[i].ob
                 if o:
-                    o.mc.object_collision = False
+                    o.mclo.object_collision = False
                 else:
-                    scene.mc.collider_pointers.remove(i)
+                    scene.mclo.collider_pointers.remove(i)
 
         #print(time.time()-T, "the whole enchalada")
         # objects ---
@@ -1025,7 +1023,7 @@ def run_handler(ob, cloth):
             cloth.co[pin_list] = hook_co
             cloth.vel[pin_list] = 0
 
-        if ob.mc.clicked: # for the grab tool
+        if ob.mclo.clicked: # for the grab tool
             cloth.co[extra_data['vidx']] = np.array(extra_data['stored_vidx']) + np.array(+ extra_data['move'])
 
 
@@ -1178,7 +1176,7 @@ def v_per_tri(co, tri_min, tri_max, idxer, tridexer, c_peat=None, t_peat=None):
     co_x, co_y, co_z = co[:, 0], co[:, 1], co[:, 2]
     
     subs = 7
-    #subs = bpy.data.objects['Plane.002'].mc.grid_size
+    #subs = bpy.data.objects['Plane.002'].mclo.grid_size
     
     c_peat, t_peat = z_grid(co_z, tri_min[:, 2], tri_max[:, 2], subs, co_x, tri_min[:, 0], tri_max[:, 0], co_y, tri_min[:, 1], tri_max[:, 1])
     if c_peat is None:
@@ -1271,14 +1269,14 @@ def object_collide(cloth_ob, col_ob):
     proxy_in_place(col, proxy)
     apply_in_place(cloth_ob, cloth.co, cloth)
     
-    inner_margin = col_ob.mc.object_collision_inner_margin
-    outer_margin = col_ob.mc.object_collision_outer_margin
+    inner_margin = col_ob.mclo.object_collision_inner_margin
+    outer_margin = col_ob.mclo.object_collision_outer_margin
     fudge = max(inner_margin, outer_margin)
 
     # check object bounds: (need inner and out margins to adjust box size)
     box_check, co1_min, co1_max = bounds_check(cloth.co, col.co, fudge)
     # check for triangles inside the cloth bounds
-    #anim = col_ob.mc.collision_animated
+    #anim = col_ob.mclo.collision_animated
 
 
     if box_check:
@@ -1351,7 +1349,7 @@ def self_collide(ob):
     cloth = get_cloth_data(ob)
     #col = get_collider_data(ob)
 
-    margin = ob.mc.object_collision_outer_margin
+    margin = ob.mclo.object_collision_outer_margin
     fudge = margin
 
     tri_co = cloth.tri_co
@@ -1465,7 +1463,7 @@ def create_collider_data(ob):
     col.tridexer = np.arange(col.tridex.shape[0], dtype=np.int32)
     # cross_vecs used later by barycentric tri check
     proxy_v_normals_in_place(col, True, proxy)
-    marginalized = np.array(col.co + col.v_normals * ob.mc.object_collision_outer_margin, dtype=np.float32)
+    marginalized = np.array(col.co + col.v_normals * ob.mclo.object_collision_outer_margin, dtype=np.float32)
     col.cross_vecs, col.origins, col.normals = get_tri_normals(marginalized[col.tridex])    
 
     col.cross_vecs.dtype = np.float32
@@ -1492,7 +1490,7 @@ def create_self_collider(ob):
     col.tridexer = np.arange(col.tridex.shape[0], dtype=np.int32)
     # cross_vecs used later by barycentric tri check
     proxy_v_normals_in_place(col)
-    marginalized = np.array(col.co + col.v_normals * ob.mc.object_collision_outer_margin, dtype=np.float32)
+    marginalized = np.array(col.co + col.v_normals * ob.mclo.object_collision_outer_margin, dtype=np.float32)
     col.cross_vecs, col.origins, col.normals = get_tri_normals(marginalized[col.tridex])    
 
     col.cross_vecs.dtype = np.float32
@@ -1510,10 +1508,10 @@ def collision_object_update(self, context):
     ob = self.id_data
 
     if self.object_collision:
-        cp = scene.mc.collider_pointers.add()
+        cp = scene.mclo.collider_pointers.add()
         cp.ob = ob
     else:
-        for i, cp in enumerate(scene.mc.collider_pointers):
+        for i, cp in enumerate(scene.mclo.collider_pointers):
             if cp.ob == ob:
 
                 # Remove collider data first
@@ -1524,7 +1522,7 @@ def collision_object_update(self, context):
                 for key in cull_keys:
                     del(col_data[key])
 
-                scene.mc.collider_pointers.remove(i)
+                scene.mclo.collider_pointers.remove(i)
                 break
     
 
@@ -1536,14 +1534,14 @@ def cloth_object_update(self, context):
 
 def manage_animation_handler(self, context):
     ob = self.id_data
-    if ob.mc.frame_update:
-        ob.mc.scene_update = False
+    if ob.mclo.frame_update:
+        ob.mclo.scene_update = False
     
 
 def manage_continuous_handler(self, context):    
     ob = self.id_data
-    if ob.mc.scene_update:
-        ob.mc.frame_update = False
+    if ob.mclo.scene_update:
+        ob.mclo.frame_update = False
     
 
 # =================  Handler  ======================
@@ -1561,36 +1559,36 @@ def handler_unified(scene, frame_update=False):
     data = bpy.context.scene.modeling_cloth_data_set
     cull_ids = []
 
-    for i, cp in enumerate(scene.mc.cloth_pointers):
+    for i, cp in enumerate(scene.mclo.cloth_pointers):
         ob = cp.ob
 
         # Check if object still exists
         if not ob or (ob and not scene.objects.get(ob.name)):
-            if scene.mc.last_object == ob:
-                scene.mc.last_object = None
+            if scene.mclo.last_object == ob:
+                scene.mclo.last_object = None
             cull_ids.append(i)
 
         else:
             cloth = get_cloth_data(ob)
 
             # Frame update
-            if frame_update and ob.mc.frame_update:
+            if frame_update and ob.mclo.frame_update:
                 run_handler(ob, cloth)
-                if ob.mc.auto_reset:
+                if ob.mclo.auto_reset:
                     if scene.frame_current <= 1:    
                         reset_shapes(ob)
 
             # Scene update
-            elif not frame_update and ob.mc.scene_update:
+            elif not frame_update and ob.mclo.scene_update:
                 run_handler(ob, cloth)
 
     # Remove missing object from cloth pointer
     for i in reversed(cull_ids):
-        ob = scene.mc.cloth_pointers[i].ob
+        ob = scene.mclo.cloth_pointers[i].ob
         if ob:
-            ob.mc.enable = False
+            ob.mclo.enable = False
         else:
-            scene.mc.cloth_pointers.remove(i)
+            scene.mclo.cloth_pointers.remove(i)
 
 
 def get_cloth_data(ob):
@@ -1615,15 +1613,15 @@ def enable_cloth(self, context):
     scene = context.scene
     data = scene.modeling_cloth_data_set
     extra_data = scene.modeling_cloth_data_set_extra
-    scene.mc.last_object = ob
+    scene.mclo.last_object = ob
     
-    if ob.mc.enable:
+    if ob.mclo.enable:
         # New cloth on scene data
-        cp = scene.mc.cloth_pointers.add()
+        cp = scene.mclo.cloth_pointers.add()
         cp.ob = ob
         create_cloth_data(ob)
     else:
-        for i, cp in enumerate(scene.mc.cloth_pointers):
+        for i, cp in enumerate(scene.mclo.cloth_pointers):
             if cp.ob == ob:
 
                 # Remove cloth data first
@@ -1636,14 +1634,14 @@ def enable_cloth(self, context):
                     del(data[key])
 
                 # Remove pointers
-                scene.mc.cloth_pointers.remove(i)
+                scene.mclo.cloth_pointers.remove(i)
     
 def visible_objects_and_duplis(context):
     """Loop over (object, matrix) pairs (mesh only)"""
 
     for obj in context.visible_objects:
         if obj.type == 'MESH':
-            if obj.mc.enable:    
+            if obj.mclo.enable:    
                 yield (obj, obj.matrix_world.copy())
                    
 def obj_ray_cast(obj, matrix, ray_origin, ray_target):
@@ -1700,7 +1698,7 @@ class ModelingClothPin(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.space_data.type == 'VIEW_3D' and any(context.scene.mc.cloth_pointers)
+        return context.space_data.type == 'VIEW_3D' and any(context.scene.mclo.cloth_pointers)
 
     def __init__(self):
         self.obj = None
@@ -1709,7 +1707,7 @@ class ModelingClothPin(bpy.types.Operator):
 
     def invoke(self, context, event):
         #bpy.ops.object.select_all(action='DESELECT')    
-        context.scene.mc.pin_alert = True
+        context.scene.mclo.pin_alert = True
 
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
@@ -1775,7 +1773,7 @@ class ModelingClothPin(bpy.types.Operator):
                 e.show_x_ray = True
                 e.select = True
                 e.empty_draw_size = .1
-                pin = self.obj.mc.pins.add()
+                pin = self.obj.mclo.pins.add()
                 pin.vertex_id = self.closest
                 pin.hook = e
                 self.latest_hit = None
@@ -1783,10 +1781,10 @@ class ModelingClothPin(bpy.types.Operator):
         
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
             delete_guide()
-            cloths = [i for i in bpy.data.objects if i.mc.enable] # so we can select an empty and keep the settings menu up
-            context.scene.mc.pin_alert = False
+            cloths = [i for i in bpy.data.objects if i.mclo.enable] # so we can select an empty and keep the settings menu up
+            context.scene.mclo.pin_alert = False
             if len(cloths) > 0:                                        #
-                ob = context.scene.mc.last_object
+                ob = context.scene.mclo.last_object
                 bpy.context.scene.objects.active = ob
             bpy.context.window.cursor_set("DEFAULT")
             return {'FINISHED'}
@@ -1807,7 +1805,7 @@ class ModelingClothDrag(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.space_data.type == 'VIEW_3D' and any(context.scene.mc.cloth_pointers)
+        return context.space_data.type == 'VIEW_3D' and any(context.scene.mclo.cloth_pointers)
 
     def __init__(self):
         self.clicked = False
@@ -1817,16 +1815,16 @@ class ModelingClothDrag(bpy.types.Operator):
     def invoke(self, context, event):
         scene = context.scene
         extra_data = scene.modeling_cloth_data_set_extra
-        scene.mc.drag_alert = True
+        scene.mclo.drag_alert = True
         #bpy.ops.object.select_all(action='DESELECT')    
 
         extra_data['vidx'] = None # Vertex ids of dragged face
         extra_data['stored_vidx'] = None # Vertex coordinates
         extra_data['move'] = None # Direction of drag
 
-        for cp in scene.mc.cloth_pointers:
+        for cp in scene.mclo.cloth_pointers:
             if cp.ob:
-                cp.ob.mc.clicked = False
+                cp.ob.mclo.clicked = False
             
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
@@ -1866,7 +1864,7 @@ class ModelingClothDrag(bpy.types.Operator):
                         best_matrix = matrix
 
             if best_obj:
-                best_obj.mc.clicked = True
+                best_obj.mclo.clicked = True
                 vidx = [v for v in best_obj.data.polygons[best_face_index].vertices]
                 vert = best_obj.data.shape_keys.key_blocks['modeling cloth key'].data
                 extra_data['vidx'] = vidx
@@ -1904,15 +1902,15 @@ class ModelingClothDrag(bpy.types.Operator):
             extra_data['vidx'] = None
             #for key, cloth in data.items():
             #    cloth.clicked = False
-            for cp in scene.mc.cloth_pointers:
+            for cp in scene.mclo.cloth_pointers:
                 if cp.ob:
-                    cp.ob.mc.clicked = False
+                    cp.ob.mclo.clicked = False
             
         elif event.type in {'RIGHTMOUSE', 'ESC'}:
             self.clicked = False
             self.stored_mouse = None
             bpy.context.window.cursor_set("DEFAULT")
-            scene.mc.drag_alert = False
+            scene.mclo.drag_alert = False
             return {'FINISHED'}
 
         return {'RUNNING_MODAL'}
@@ -1933,9 +1931,9 @@ class DeletePins(bpy.types.Operator):
         ob = get_last_object() # returns tuple with list and last cloth objects or None
         if not ob: return {'CANCELLED'}
 
-        for i, pin in reversed(list(enumerate(ob[1].mc.pins))):
+        for i, pin in reversed(list(enumerate(ob[1].mclo.pins))):
             bpy.data.objects.remove(pin.hook)
-            ob[1].mc.pins.remove(i)
+            ob[1].mclo.pins.remove(i)
 
         bpy.context.scene.objects.active = ob[1]
         return {'FINISHED'}
@@ -1950,7 +1948,7 @@ class SelectPins(bpy.types.Operator):
         ob = get_last_object() # returns list and last cloth objects or None
         if not ob: return {'CANCELLED'}
         #bpy.ops.object.select_all(action='DESELECT')
-        for pin in ob[1].mc.pins:
+        for pin in ob[1].mclo.pins:
             pin.hook.select = True
 
         return {'FINISHED'}
@@ -1978,7 +1976,7 @@ class PinSelected(bpy.types.Operator):
             e.show_x_ray = True
             e.select = True
             e.empty_draw_size = .1
-            pin = ob.mc.pins.add()
+            pin = ob.mclo.pins.add()
             pin.vertex_id = v
             pin.hook = e
             ob.select = False
@@ -2209,8 +2207,8 @@ class ModelingClothObjectProps(bpy.types.PropertyGroup):
 
 def create_properties():            
 
-    bpy.types.Scene.mc = PointerProperty(type=ModelingClothGlobals)
-    bpy.types.Object.mc = PointerProperty(type=ModelingClothObjectProps)
+    bpy.types.Scene.mclo = PointerProperty(type=ModelingClothGlobals)
+    bpy.types.Object.mclo = PointerProperty(type=ModelingClothObjectProps)
 
     # property dictionaries
     bpy.types.Scene.modeling_cloth_data_set = {} 
@@ -2228,11 +2226,11 @@ def refresh_cloth_data(scene):
 
     # Create new data based on available clothes and colliders
     scene = bpy.context.scene
-    for cp in scene.mc.cloth_pointers:
+    for cp in scene.mclo.cloth_pointers:
         if cp.ob:
             create_cloth_data(cp.ob)
 
-    for cp in scene.mc.collider_pointers:
+    for cp in scene.mclo.collider_pointers:
         if cp.ob:
             create_collider_data(cp.ob)
 
@@ -2260,74 +2258,74 @@ class ModelingClothPanel(bpy.types.Panel):
         col = layout.column(align=True)
         col.label(text="Modeling Cloth")
         ob = bpy.context.object
-        cloths = [i for i in bpy.data.objects if i.mc.enable] # so we can select an empty and keep the settings menu up
+        cloths = [i for i in bpy.data.objects if i.mclo.enable] # so we can select an empty and keep the settings menu up
         if len(cloths) > 0:
-            status = scene.mc.pin_alert
+            status = scene.mclo.pin_alert
             if ob is not None:
                 if ob.type != 'MESH' or status:
-                    ob = scene.mc.last_object
+                    ob = scene.mclo.last_object
 
         if ob is not None:
             if ob.type == 'MESH':
-                col.prop(ob.mc ,"enable", text="Modeling Cloth", icon='SURFACE_DATA')               
+                col.prop(ob.mclo ,"enable", text="Modeling Cloth", icon='SURFACE_DATA')               
 
-                col.prop(ob.mc ,"object_collision", text="Collider", icon="STYLUS_PRESSURE")
-                #if ob.mc.object_collision:
-                    #col.prop(ob.mc ,"collision_animated", text="Animated", icon="POSE_DATA")
-                if ob.mc.object_collision:
-                    col.prop(ob.mc ,"object_collision_outer_margin", text="Outer Margin", icon="FORCE_FORCE")
-                    col.prop(ob.mc ,"object_collision_inner_margin", text="Inner Margin", icon="STICKY_UVS_LOC")
+                col.prop(ob.mclo ,"object_collision", text="Collider", icon="STYLUS_PRESSURE")
+                #if ob.mclo.object_collision:
+                    #col.prop(ob.mclo ,"collision_animated", text="Animated", icon="POSE_DATA")
+                if ob.mclo.object_collision:
+                    col.prop(ob.mclo ,"object_collision_outer_margin", text="Outer Margin", icon="FORCE_FORCE")
+                    col.prop(ob.mclo ,"object_collision_inner_margin", text="Inner Margin", icon="STICKY_UVS_LOC")
                 
                 col.label("Collide List:")
-                for cp in scene.mc.collider_pointers:
+                for cp in scene.mclo.collider_pointers:
                     if cp.ob:
                         col.label(cp.ob.name)
 
-                if ob.mc.enable:
+                if ob.mclo.enable:
                     #col.label('Active: ' + ob.name)
 
                     # object collisions
                     col = layout.column(align=True)
                     col.label("Collisions")
-                    col.prop(ob.mc ,"object_collision_detect", text="Object Collisions", icon="PHYSICS")
+                    col.prop(ob.mclo ,"object_collision_detect", text="Object Collisions", icon="PHYSICS")
 
                     col = layout.column(align=True)
                     col.scale_y = 2.0
 
                     col = layout.column(align=True)
                     col.scale_y = 1.4
-                    col.prop(ob.mc, "grid_size", text="Grid Boxes", icon="MESH_GRID")
-                    col.prop(ob.mc, "frame_update", text="Animation Update", icon="TRIA_RIGHT")
-                    if ob.mc.frame_update:    
-                        col.prop(ob.mc, "auto_reset", text="Frame 1 Reset")
-                    col.prop(ob.mc, "scene_update", text="Continuous Update", icon="TIME")
+                    col.prop(ob.mclo, "grid_size", text="Grid Boxes", icon="MESH_GRID")
+                    col.prop(ob.mclo, "frame_update", text="Animation Update", icon="TRIA_RIGHT")
+                    if ob.mclo.frame_update:    
+                        col.prop(ob.mclo, "auto_reset", text="Frame 1 Reset")
+                    col.prop(ob.mclo, "scene_update", text="Continuous Update", icon="TIME")
                     col = layout.column(align=True)
                     col.scale_y = 2.0
                     col.operator("object.modeling_cloth_reset", text="Reset")
-                    col.alert = scene.mc.drag_alert
+                    col.alert = scene.mclo.drag_alert
                     col.operator("view3d.modeling_cloth_drag", text="Grab")
                     col = layout.column(align=True)
                         
-                    col.prop(ob.mc ,"iterations", text="Iterations")#, icon='OUTLINER_OB_LATTICE')               
-                    col.prop(ob.mc ,"spring_force", text="Stiffness")#, icon='OUTLINER_OB_LATTICE')               
-                    col.prop(ob.mc ,"push_springs", text="Push Springs")#, icon='OUTLINER_OB_LATTICE')               
-                    col.prop(ob.mc ,"noise", text="Noise")#, icon='PLAY')               
-                    col.prop(ob.mc ,"noise_decay", text="Decay Noise")#, icon='PLAY')               
-                    col.prop(ob.mc ,"gravity", text="Gravity")#, icon='PLAY')        
-                    col.prop(ob.mc ,"inflate", text="Inflate")#, icon='PLAY')        
-                    col.prop(ob.mc ,"sew", text="Sew Force")#, icon='PLAY')        
-                    col.prop(ob.mc ,"velocity", text="Velocity")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"iterations", text="Iterations")#, icon='OUTLINER_OB_LATTICE')               
+                    col.prop(ob.mclo ,"spring_force", text="Stiffness")#, icon='OUTLINER_OB_LATTICE')               
+                    col.prop(ob.mclo ,"push_springs", text="Push Springs")#, icon='OUTLINER_OB_LATTICE')               
+                    col.prop(ob.mclo ,"noise", text="Noise")#, icon='PLAY')               
+                    col.prop(ob.mclo ,"noise_decay", text="Decay Noise")#, icon='PLAY')               
+                    col.prop(ob.mclo ,"gravity", text="Gravity")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"inflate", text="Inflate")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"sew", text="Sew Force")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"velocity", text="Velocity")#, icon='PLAY')        
                     col = layout.column(align=True)
                     col.label("Wind")                
-                    col.prop(ob.mc ,"wind_x", text="Wind X")#, icon='PLAY')        
-                    col.prop(ob.mc ,"wind_y", text="Wind Y")#, icon='PLAY')        
-                    col.prop(ob.mc ,"wind_z", text="Wind Z")#, icon='PLAY')        
-                    col.prop(ob.mc ,"turbulence", text="Turbulence")#, icon='PLAY')        
-                    col.prop(ob.mc ,"floor", text="Floor")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"wind_x", text="Wind X")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"wind_y", text="Wind Y")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"wind_z", text="Wind Z")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"turbulence", text="Turbulence")#, icon='PLAY')        
+                    col.prop(ob.mclo ,"floor", text="Floor")#, icon='PLAY')        
                     col = layout.column(align=True)
                     col.scale_y = 1.5
                     col.alert = status
-                    if ob.mc.enable:    
+                    if ob.mclo.enable:    
                         if ob.mode == 'EDIT':
                             col.operator("object.modeling_cloth_pin_selected", text="Pin Selected")
                             col = layout.column(align=True)
@@ -2341,10 +2339,10 @@ class ModelingClothPanel(bpy.types.Panel):
                         col.operator("object.modeling_cloth_grow", text="Grow Source")
                         col.operator("object.modeling_cloth_shrink", text="Shrink Source")
                         col = layout.column(align=True)
-                        #col.prop(ob.mc ,"self_collision", text="Self Collision")#, icon='PLAY')        
-                        #col.prop(ob.mc ,"self_collision_force", text="Repel")#, icon='PLAY')        
-                        #col.prop(ob.mc ,"self_collision_margin", text="Margin")#, icon='PLAY')        
-                        #col.prop(ob.mc ,"self_collision_cy_size", text="Cylinder Size")#, icon='PLAY')        
+                        #col.prop(ob.mclo ,"self_collision", text="Self Collision")#, icon='PLAY')        
+                        #col.prop(ob.mclo ,"self_collision_force", text="Repel")#, icon='PLAY')        
+                        #col.prop(ob.mclo ,"self_collision_margin", text="Margin")#, icon='PLAY')        
+                        #col.prop(ob.mclo ,"self_collision_cy_size", text="Cylinder Size")#, icon='PLAY')        
 
                     
                 # =============================
