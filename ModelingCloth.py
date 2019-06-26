@@ -735,7 +735,8 @@ def bend_springs(cloth, co, measure=None):
     # should I rotate the unit vecs or the source?
     #   rotating the unit vecs here.
     
-    stiff = cloth.ob.modeling_cloth_bend_stiff * 0.0057
+    #stiff = cloth.ob.modeling_cloth_bend_stiff * 0.0057
+    stiff = cloth.ob.mclo.bend_stiff * 0.0057
     rot_ls = q_rotate(u_tcp_ls, l_ws, l_axes) 
     l_force = (rot_ls - u_tcp_ls) * stiff
     
@@ -2622,11 +2623,34 @@ def collision_series(paperback=True, kindle=True):
 
 
 def register():
+    # Operators
+    bpy.utils.register_class(ModelingClothSew)
+    bpy.utils.register_class(ModelingClothPin)
+    bpy.utils.register_class(ModelingClothDrag)
+    bpy.utils.register_class(DeletePins)
+    bpy.utils.register_class(SelectPins)
+    bpy.utils.register_class(PinSelected)
+    bpy.utils.register_class(GrowSource)
+    bpy.utils.register_class(ShrinkSource)
+    bpy.utils.register_class(ResetShapes)
+    bpy.utils.register_class(AddVirtualSprings)
+    bpy.utils.register_class(RemoveVirtualSprings)
+    bpy.utils.register_class(ApplyClothToMesh)
+    bpy.utils.register_class(CollisionSeries)
+    bpy.utils.register_class(CollisionSeriesKindle)
+    bpy.utils.register_class(Donate)
+
+    # Props
+    bpy.utils.register_class(ModelingClothObject)
+    bpy.utils.register_class(ModelingClothCollider)
+    bpy.utils.register_class(ModelingClothGlobals)
+    bpy.utils.register_class(ModelingClothPinObject)
+    bpy.utils.register_class(ModelingClothVirtualSpring)
+    bpy.utils.register_class(ModelingClothObjectProps)
     create_properties()
 
-    # Register all classes if this file loaded separately
-    if __name__ in {'__main__', 'ModelingCloth'}:
-        bpy.utils.register_module(__name__)
+    # Panels
+    bpy.utils.register_class(ModelingClothPanel)
 
     # Main handlers
     bpy.app.handlers.frame_change_post.append(handler_frame)
@@ -2644,11 +2668,34 @@ def unregister():
     bpy.app.handlers.frame_change_post.remove(handler_frame)
     bpy.app.handlers.scene_update_post.remove(handler_scene)
 
-    remove_properties()
+    # Operators
+    bpy.utils.unregister_class(ModelingClothSew)
+    bpy.utils.unregister_class(ModelingClothPin)
+    bpy.utils.unregister_class(ModelingClothDrag)
+    bpy.utils.unregister_class(DeletePins)
+    bpy.utils.unregister_class(SelectPins)
+    bpy.utils.unregister_class(PinSelected)
+    bpy.utils.unregister_class(GrowSource)
+    bpy.utils.unregister_class(ShrinkSource)
+    bpy.utils.unregister_class(ResetShapes)
+    bpy.utils.unregister_class(AddVirtualSprings)
+    bpy.utils.unregister_class(RemoveVirtualSprings)
+    bpy.utils.unregister_class(ApplyClothToMesh)
+    bpy.utils.unregister_class(CollisionSeries)
+    bpy.utils.unregister_class(CollisionSeriesKindle)
+    bpy.utils.unregister_class(Donate)
 
-    # Unregister all classes if this file loaded individually
-    if __name__ in {'__main__', 'ModelingCloth'}:
-        bpy.utils.unregister_module(__name__)
+    # Props
+    remove_properties()
+    bpy.utils.unregister_class(ModelingClothObject)
+    bpy.utils.unregister_class(ModelingClothCollider)
+    bpy.utils.unregister_class(ModelingClothGlobals)
+    bpy.utils.unregister_class(ModelingClothPinObject)
+    bpy.utils.unregister_class(ModelingClothVirtualSpring)
+    bpy.utils.unregister_class(ModelingClothObjectProps)
+
+    # Panels
+    bpy.utils.unregister_class(ModelingClothPanel)
 
     
 if __name__ == "__main__":

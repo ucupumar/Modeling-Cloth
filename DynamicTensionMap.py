@@ -561,11 +561,17 @@ class DynamicTensionMap(bpy.types.Panel):
 
 # Register Clases -------------->>>
 def register():
+    # Props
+    bpy.utils.register_class(DynamicTensionObjectPointer)
+    bpy.utils.register_class(DynamicTensionObjectProps)
+    bpy.utils.register_class(DynamicTensionSceneProps)
     create_properties()
 
-    # Register all classes if this file loaded separately
-    if __name__ in {'__main__', 'DynamicTensionMap'}:
-        bpy.utils.register_module(__name__)
+    # Operators
+    bpy.utils.register_class(UpdatePattern)
+
+    # Panels
+    bpy.utils.register_class(DynamicTensionMap)
 
     bpy.app.handlers.scene_update_post.append(dynamic_tension_handler)
 
@@ -580,11 +586,17 @@ def unregister():
 
     bpy.app.handlers.scene_update_post.remove(dynamic_tension_handler)
 
+    # Props
     remove_properties()
+    bpy.utils.unregister_class(DynamicTensionObjectPointer)
+    bpy.utils.unregister_class(DynamicTensionObjectProps)
+    bpy.utils.unregister_class(DynamicTensionSceneProps)
 
-    # Unregister all classes if this file loaded separately
-    if __name__ in {'__main__', 'DynamicTensionMap'}:
-        bpy.utils.unregister_module(__name__)
+    # Operators
+    bpy.utils.unregister_class(UpdatePattern)
+
+    # Panels
+    bpy.utils.unregister_class(DynamicTensionMap)
 
     
 if __name__ == "__main__":

@@ -573,11 +573,18 @@ class SurfaceFollowPanel(bpy.types.Panel):
 # Register Clases -------------->>>
 
 def register():
+    # Props
+    bpy.utils.register_class(SurfaceFollowFollowerPointer)
+    bpy.utils.register_class(SurfaceFollowSceneProps)
     create_properties()
 
-    # Register all classes if this file loaded separately
-    if __name__ in {'__main__', 'SurfaceFollow'}:
-        bpy.utils.register_module(__name__)
+    # Operators
+    bpy.utils.register_class(UnbindFromSurface)
+    bpy.utils.register_class(BindToSurface)
+    bpy.utils.register_class(UpdateOnce)
+
+    # Panels
+    bpy.utils.register_class(SurfaceFollowPanel)
 
     # Main handlers
     bpy.app.handlers.frame_change_post.append(handler_frame)
@@ -594,11 +601,18 @@ def unregister():
     bpy.app.handlers.frame_change_post.remove(handler_frame)
     bpy.app.handlers.scene_update_post.remove(handler_scene)
 
+    # Props
     remove_properties()
+    bpy.utils.unregister_class(SurfaceFollowFollowerPointer)
+    bpy.utils.unregister_class(SurfaceFollowSceneProps)
 
-    # Unregister all classes if this file loaded separately
-    if __name__ in {'__main__', 'SurfaceFollow'}:
-        bpy.utils.unregister_module(__name__)
+    # Operators
+    bpy.utils.unregister_class(UnbindFromSurface)
+    bpy.utils.unregister_class(BindToSurface)
+    bpy.utils.unregister_class(UpdateOnce)
+
+    # Panels
+    bpy.utils.unregister_class(SurfaceFollowPanel)
 
 if __name__ == "__main__":
     register()

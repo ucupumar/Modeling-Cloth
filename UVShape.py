@@ -483,18 +483,28 @@ class Print3DTools(bpy.types.Panel):
 
         
 def register():
+    # Props
     create_properties()
 
-    # Register all classes if this file loaded separately
-    if __name__ in {'__main__', 'UVShape'}:
-        bpy.utils.register_module(__name__)
+    # Operators
+    bpy.utils.register_class(ShapeFromUV)
+    bpy.utils.register_class(AutosplitGeometry)
+    bpy.utils.register_class(UpdateLineLengths)
+
+    # Panels
+    bpy.utils.register_class(Print3DTools)
 
 def unregister():
+    # Props
     remove_properties()
 
-    # Unregister all classes if this file loaded separately
-    if __name__ in {'__main__', 'UVShape'}:
-        bpy.utils.unregister_module(__name__)
+    # Operators
+    bpy.utils.unregister_class(ShapeFromUV)
+    bpy.utils.unregister_class(AutosplitGeometry)
+    bpy.utils.unregister_class(UpdateLineLengths)
+
+    # Panels
+    bpy.utils.unregister_class(Print3DTools)
     
 if __name__ == "__main__":
     register()
